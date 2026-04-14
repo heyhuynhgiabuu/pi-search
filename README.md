@@ -6,7 +6,7 @@
 
 It combines:
 - real-time **web search** via Exa AI
-- **code and API search** via Exa AI's code index
+- **technical docs and API search** via Exa AI web search
 - **official documentation lookup** via Context7
 - **real-world GitHub code search** via grep.app
 
@@ -18,7 +18,7 @@ The goal is simple: install one extension and get a practical research toolkit f
 |------|--------|-------------|
 | **`grepsearch`** | [grep.app](https://grep.app) | Search real-world code on GitHub. Use literal patterns like `"useState("`, not keywords. |
 | **`websearch`** | [Exa AI](https://exa.ai) | Real-time web search. No API key required. |
-| **`codesearch`** | [Exa AI](https://exa.ai) | Code-specific doc/example search. No API key required. |
+| **`codesearch`** | [Exa AI](https://exa.ai) | Technical doc/example search tuned for programming queries and powered by Exa web search. No API key required. |
 | **`context7`** | [Context7](https://context7.com) | Resolve library IDs and fetch library documentation. Optional `CONTEXT7_API_KEY` for higher rate limits. |
 
 ## Install
@@ -52,7 +52,7 @@ context7({ operation: "query", libraryId: "/reactjs/react.dev", topic: "hooks" }
 ## When to use which tool
 
 - `websearch` → current information, blog posts, docs, release notes, discussions
-- `codesearch` → programming docs, API examples, framework usage
+- `codesearch` → programming docs, API examples, framework usage, and technical references
 - `context7` → official library documentation after resolving the right library ID
 - `grepsearch` → how real repositories use an API in practice
 

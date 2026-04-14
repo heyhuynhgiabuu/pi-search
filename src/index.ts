@@ -7,12 +7,14 @@
  * Tools:
  *   • grepsearch — Search real-world code on GitHub via grep.app
  *   • websearch  — Real-time web search via Exa AI (no API key)
- *   • codesearch — Code-specific doc/example search via Exa AI (no API key)
+ *   • codesearch — Technical doc/example search via Exa AI web search (no API key)
  *   • context7   — Resolve library IDs and query official documentation
  *
  * Architecture:
  *   Single extension entry point registers all tools.
  *   grep.app and Context7 use plain REST. Exa uses JSON-RPC 2.0 over SSE.
+ *   codesearch is implemented on top of Exa web search because the current public MCP endpoint exposes
+ *   web tools (`web_search_exa`, `web_fetch_exa`) but not the older dedicated code-context tool.
  *   Zero runtime dependencies beyond @sinclair/typebox for param schemas.
  */
 
@@ -320,15 +322,15 @@ Examples:
 	});
 
 	// -----------------------------------------------------------------------
-	// Tool 3: codesearch — Code-specific search via Exa AI
+	// Tool 3: codesearch — Technical doc/example search via Exa AI web search
 	// -----------------------------------------------------------------------
 
 	pi.registerTool({
 		name: "codesearch",
 		label: "Code Search",
 		description:
-			"Search for programming documentation, code examples, and API references using Exa AI's code-specific index. Better than web search for technical queries. No API key required.",
-		promptSnippet: "Search code-specific docs and API references via Exa AI.",
+			"Search for programming documentation, code examples, and API references using Exa AI. Tuned for technical queries and implemented on top of Exa web search because the public MCP endpoint does not currently expose a dedicated code-search tool. No API key required.",
+		promptSnippet: "Search technical docs and API references via Exa AI.",
 
 		parameters: Type.Object({
 			query: Type.String({
@@ -340,17 +342,23 @@ Examples:
 		async execute(_toolCallId: string, params: { query: string; numResults?: number }, signal: AbortSignal) {
 			try {
 				const result = await callExaMCP(
-					"get_code_context_exa",
-					{ query: params.query, numResults: Math.min(params.numResults ?? 5, 10) },
+					"web_search_exa",
+					{
+						query: `programming documentation, API reference, code examples, official docs, GitHub examples for: ${params.query}`,
+						numResults: Math.min(params.numResults ?? 5, 10),
+					},
 					signal,
 					30_000,
 				);
-				return { content: [{ type: "text" as const, text: result }], details: {} };
+				return {
+					content: [{ type: "text" as const, text: result }],
+					details: { backend: "web_search_exa" },
+				};
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				return {
 					content: [{ type: "text" as const, text: `Code search failed: ${msg}` }],
-					details: {},
+					details: { backend: "web_search_exa" },
 				};
 			}
 		},

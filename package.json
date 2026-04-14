@@ -1,0 +1,51 @@
+{
+	"name": "@heyhuynhgiabuu/pi-search",
+	"version": "0.1.0",
+	"description": "Web search, code search, and GitHub grep for pi — Exa AI + grep.app in one extension.",
+	"author": "huynhgiabuu",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/buddingnewinsights/pi-search.git"
+	},
+	"homepage": "https://github.com/buddingnewinsights/pi-search#readme",
+	"bugs": {
+		"url": "https://github.com/buddingnewinsights/pi-search/issues"
+	},
+	"keywords": [
+		"pi-package",
+		"pi",
+		"pi-extension",
+		"search",
+		"exa",
+		"grep",
+		"websearch",
+		"codesearch"
+	],
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.5",
+		"@sinclair/typebox": "^0.34.0",
+		"@types/node": "^20.0.0",
+		"typescript": "^5.0.0",
+		"vitest": "^4.0.18"
+	},
+	"dependencies": {
+		"@sinclair/typebox": "^0.34.0"
+	},
+	"scripts": {
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check src/",
+		"lint:fix": "biome check --fix src/",
+		"test": "vitest run --passWithNoTests",
+		"test:watch": "vitest --passWithNoTests"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	}
+}

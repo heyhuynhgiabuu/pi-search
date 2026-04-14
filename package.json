@@ -1,7 +1,7 @@
 {
 	"name": "@heyhuynhgiabuu/pi-search",
-	"version": "0.1.0",
-	"description": "Web search, code search, and GitHub grep for pi — Exa AI + grep.app in one extension.",
+	"version": "0.2.0",
+	"description": "Unified search toolkit for pi — web search, code search, docs lookup, and GitHub code search in one extension.",
 	"author": "huynhgiabuu",
 	"license": "MIT",
 	"repository": {
@@ -20,8 +20,13 @@
 		"pi",
 		"pi-extension",
 		"search",
+		"web-search",
+		"code-search",
+		"documentation",
+		"context7",
 		"exa",
-		"grep",
+		"grepapp",
+		"grepsearch",
 		"websearch",
 		"codesearch"
 	],

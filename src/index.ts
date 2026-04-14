@@ -1,5 +1,5 @@
 /**
- * pi-search — Web search, code search, and GitHub grep for pi.
+ * pi-search — Web search, code search, GitHub grep, and docs lookup for pi.
  *
  * @module pi-search
  * @see https://github.com/buddingnewinsights/pi-search
@@ -8,10 +8,11 @@
  *   • grepsearch — Search real-world code on GitHub via grep.app
  *   • websearch  — Real-time web search via Exa AI (no API key)
  *   • codesearch — Code-specific doc/example search via Exa AI (no API key)
+ *   • context7   — Resolve library IDs and query official documentation
  *
  * Architecture:
- *   Single extension entry point registers all three tools.
- *   grep.app uses plain REST. Exa uses JSON-RPC 2.0 over SSE.
+ *   Single extension entry point registers all tools.
+ *   grep.app and Context7 use plain REST. Exa uses JSON-RPC 2.0 over SSE.
  *   Zero runtime dependencies beyond @sinclair/typebox for param schemas.
  */
 
@@ -23,6 +24,7 @@ import { Type } from "@sinclair/typebox";
 
 const GREP_APP_API = "https://grep.app/api/search";
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
+const CONTEXT7_API = "https://context7.com/api/v2";
 const USER_AGENT = "pi-search/1.0";
 
 // ===========================================================================
@@ -39,6 +41,18 @@ interface GrepHit {
 interface GrepResponse {
 	hits: { hits: GrepHit[] };
 	time: number;
+}
+
+interface Context7LibraryInfo {
+	id: string;
+	title: string;
+	description?: string;
+	totalSnippets?: number;
+	benchmarkScore?: number;
+}
+
+interface Context7SearchResponse {
+	results: Context7LibraryInfo[];
 }
 
 // ===========================================================================
@@ -337,6 +351,289 @@ Examples:
 				return {
 					content: [{ type: "text" as const, text: `Code search failed: ${msg}` }],
 					details: {},
+				};
+			}
+		},
+	});
+
+	// -----------------------------------------------------------------------
+	// Tool 4: context7 — Documentation lookup
+	// -----------------------------------------------------------------------
+
+	pi.registerTool({
+		name: "context7",
+		label: "Context7",
+		description: `Context7 documentation lookup: resolve library IDs and query docs.
+
+Operations:
+- "resolve": Find library ID from name (e.g., "react" → "/reactjs/react.dev")
+- "query": Get documentation for a library topic
+
+Example:
+context7({ operation: "resolve", libraryName: "react" })
+context7({ operation: "query", libraryId: "/reactjs/react.dev", topic: "hooks" })`,
+		promptSnippet: "Library documentation lookup — resolve library IDs and query docs.",
+
+		parameters: Type.Object({
+			operation: Type.Optional(
+				Type.Union([Type.Literal("resolve"), Type.Literal("query")], {
+					description: 'Operation to perform (default: "resolve")',
+				}),
+			),
+			libraryName: Type.Optional(Type.String({ description: "Library name to resolve (for resolve operation)" })),
+			libraryId: Type.Optional(Type.String({ description: "Library ID from resolve (for query operation)" })),
+			topic: Type.Optional(Type.String({ description: "Documentation topic (for query operation)" })),
+		}),
+
+		async execute(
+			_toolCallId: string,
+			params: {
+				operation?: "resolve" | "query";
+				libraryName?: string;
+				libraryId?: string;
+				topic?: string;
+			},
+			signal: AbortSignal,
+		) {
+			const operation = params.operation ?? "resolve";
+			const apiKey = process.env.CONTEXT7_API_KEY;
+			const headers: Record<string, string> = {
+				Accept: "application/json",
+				"User-Agent": USER_AGENT,
+			};
+
+			if (apiKey) {
+				headers.Authorization = `Bearer ${apiKey}`;
+			}
+
+			if (operation === "resolve") {
+				const { libraryName } = params;
+
+				if (!libraryName?.trim()) {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: "Error: libraryName is required for resolve operation",
+							},
+						],
+						details: { operation: "resolve", error: "libraryName required" },
+					};
+				}
+
+				try {
+					const url = new URL(`${CONTEXT7_API}/libs/search`);
+					url.searchParams.set("libraryName", libraryName);
+					url.searchParams.set("query", "documentation");
+
+					const response = await fetch(url.toString(), { headers, signal });
+
+					if (!response.ok) {
+						if (response.status === 401) {
+							return {
+								content: [
+									{
+										type: "text" as const,
+										text: "Error: Invalid CONTEXT7_API_KEY. Get a free key at https://context7.com/dashboard",
+									},
+								],
+								details: { operation: "resolve", error: "auth" },
+							};
+						}
+						if (response.status === 429) {
+							return {
+								content: [
+									{
+										type: "text" as const,
+										text: "Error: Rate limit exceeded. Get a free API key at https://context7.com/dashboard for higher limits.",
+									},
+								],
+								details: { operation: "resolve", error: "rate_limit" },
+							};
+						}
+						return {
+							content: [
+								{
+									type: "text" as const,
+									text: `Error: Context7 API returned ${response.status}`,
+								},
+							],
+							details: { operation: "resolve", error: `http_${response.status}` },
+						};
+					}
+
+					const data = (await response.json()) as Context7SearchResponse;
+					const libraries = data.results || [];
+
+					if (libraries.length === 0) {
+						return {
+							content: [
+								{
+									type: "text" as const,
+									text: `No libraries found matching: ${libraryName}\n\nTry:\n- Different library name\n- Check spelling\n- Use official package name`,
+								},
+							],
+							details: { operation: "resolve", query: libraryName, results: 0 },
+						};
+					}
+
+					const formatted = libraries
+						.slice(0, 5)
+						.map((lib, i) => {
+							const desc = lib.description ? `\n   ${lib.description.slice(0, 100)}...` : "";
+							const snippets = lib.totalSnippets ? ` (${lib.totalSnippets} snippets)` : "";
+							const score = lib.benchmarkScore ? ` [score: ${lib.benchmarkScore}]` : "";
+							return `${i + 1}. **${lib.title}** → \`${lib.id}\`${snippets}${score}${desc}`;
+						})
+						.join("\n\n");
+
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: `Found ${libraries.length} libraries matching "${libraryName}":\n\n${formatted}\n\n**Next step**: Use \`context7({ operation: "query", libraryId: "${libraries[0].id}", topic: "your topic" })\` to fetch documentation.`,
+							},
+						],
+						details: {
+							operation: "resolve",
+							query: libraryName,
+							results: libraries.length,
+							topResult: libraries[0].id,
+						},
+					};
+				} catch (error: unknown) {
+					if (error instanceof DOMException && error.name === "AbortError") {
+						return {
+							content: [{ type: "text" as const, text: "Request cancelled." }],
+							details: { operation: "resolve", error: "cancelled" },
+						};
+					}
+					const message = error instanceof Error ? error.message : String(error);
+					return {
+						content: [{ type: "text" as const, text: `Error resolving library: ${message}` }],
+						details: { operation: "resolve", error: message },
+					};
+				}
+			}
+
+			const { libraryId, topic } = params;
+
+			if (!libraryId?.trim()) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: 'Error: libraryId is required (use operation: "resolve" first)',
+						},
+					],
+					details: { operation: "query", error: "libraryId required" },
+				};
+			}
+
+			if (!topic?.trim()) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: "Error: topic is required (e.g., 'hooks', 'setup', 'API reference')",
+						},
+					],
+					details: { operation: "query", error: "topic required" },
+				};
+			}
+
+			try {
+				const url = new URL(`${CONTEXT7_API}/context`);
+				url.searchParams.set("libraryId", libraryId);
+				url.searchParams.set("query", topic);
+
+				const response = await fetch(url.toString(), {
+					headers: { ...headers, Accept: "text/plain" },
+					signal,
+				});
+
+				if (!response.ok) {
+					if (response.status === 401) {
+						return {
+							content: [
+								{
+									type: "text" as const,
+									text: "Error: Invalid CONTEXT7_API_KEY. Get a free key at https://context7.com/dashboard",
+								},
+							],
+							details: { operation: "query", error: "auth" },
+						};
+					}
+					if (response.status === 404) {
+						return {
+							content: [
+								{
+									type: "text" as const,
+									text: `Error: Library not found: ${libraryId}\n\nUse operation: "resolve" first to find the correct ID.`,
+								},
+							],
+							details: { operation: "query", error: "not_found" },
+						};
+					}
+					if (response.status === 429) {
+						return {
+							content: [
+								{
+									type: "text" as const,
+									text: "Error: Rate limit exceeded. Get a free API key at https://context7.com/dashboard for higher limits.",
+								},
+							],
+							details: { operation: "query", error: "rate_limit" },
+						};
+					}
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: `Error: Context7 API returned ${response.status}`,
+							},
+						],
+						details: { operation: "query", error: `http_${response.status}` },
+					};
+				}
+
+				const content = await response.text();
+
+				if (!content.trim()) {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: `No documentation found for "${topic}" in ${libraryId}.\n\nTry:\n- Simpler terms (e.g., "useState" instead of "state management")\n- Different topic spelling\n- Broader topics like "API reference" or "getting started"`,
+							},
+						],
+						details: { operation: "query", libraryId, topic, results: 0 },
+					};
+				}
+
+				const maxLen = 50_000;
+				const truncated = content.length > maxLen ? `${content.slice(0, maxLen)}\n\n... (truncated)` : content;
+
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `# Documentation: ${topic} (${libraryId})\n\n${truncated}`,
+						},
+					],
+					details: { operation: "query", libraryId, topic, length: content.length },
+				};
+			} catch (error: unknown) {
+				if (error instanceof DOMException && error.name === "AbortError") {
+					return {
+						content: [{ type: "text" as const, text: "Request cancelled." }],
+						details: { operation: "query", error: "cancelled" },
+					};
+				}
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					content: [{ type: "text" as const, text: `Error querying documentation: ${message}` }],
+					details: { operation: "query", error: message },
 				};
 			}
 		},

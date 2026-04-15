@@ -20,6 +20,7 @@ The goal is simple: install one extension and get a practical research toolkit f
 | **`websearch`** | [Exa AI](https://exa.ai) | Real-time web search. No API key required. |
 | **`codesearch`** | [Exa AI](https://exa.ai) | Technical doc/example search tuned for programming queries and powered by Exa web search. No API key required. |
 | **`context7`** | [Context7](https://context7.com) | Resolve library IDs and fetch library documentation. Optional `CONTEXT7_API_KEY` for higher rate limits. |
+| **`web_fetch`** | [Exa AI](https://exa.ai) | Fetch a webpage's full content as clean markdown. Use after `websearch`/`codesearch` to read a specific result. |
 
 ## Install
 
@@ -38,6 +39,22 @@ Optional for higher Context7 rate limits:
 ```bash
 export CONTEXT7_API_KEY=your_key_here
 ```
+
+## Configuration
+
+Create `~/.pi/agent/pi-search.json` to customize the extension.
+
+### Disable specific tools
+
+```json
+{
+  "disabledTools": ["context7", "codesearch"]
+}
+```
+
+Valid tool names: `grepsearch`, `websearch`, `codesearch`, `context7`, `web_fetch`.
+
+If the file doesn't exist or is invalid JSON, all tools are enabled by default.
 
 ## Usage
 

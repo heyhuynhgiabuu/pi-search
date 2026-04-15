@@ -18,7 +18,35 @@
  *   Zero runtime dependencies beyond @sinclair/typebox for param schemas.
  */
 
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
+
+// ===========================================================================
+// Config
+// ===========================================================================
+
+const TOOL_NAMES = ["grepsearch", "websearch", "codesearch", "context7", "web_fetch"] as const;
+type ToolName = (typeof TOOL_NAMES)[number];
+
+interface PiSearchConfig {
+	disabledTools?: ToolName[];
+}
+
+const CONFIG_PATH = join(homedir(), ".pi", "agent", "pi-search.json");
+
+function loadConfig(): PiSearchConfig {
+	try {
+		const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+		if (raw.disabledTools && !Array.isArray(raw.disabledTools)) {
+			raw.disabledTools = [];
+		}
+		return raw;
+	} catch {
+		return {};
+	}
+}
 
 // ===========================================================================
 // Constants
@@ -163,18 +191,98 @@ function cleanSnippet(html: string): string {
 }
 
 // ===========================================================================
+// Shared: Truncate Exa MCP results (Highlights can contain near-full page content)
+// ===========================================================================
+
+const MAX_HIGHLIGHTS_CHARS = 500;
+const MAX_PAGE_CHARS = 10_000;
+
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
+function paginateText(content: string, offset: number, maxChars: number, header?: string): string {
+	const slice = content.slice(offset, offset + maxChars);
+	const remaining = content.length - offset - slice.length;
+	let text = header ? header + slice : slice;
+	if (remaining > 0) {
+		text += `\n\n… [${remaining} chars remaining — call again with offset: ${offset + maxChars} to continue]`;
+	}
+	return text;
+}
+
+function truncateExaResults(raw: string): string {
+	const blocks = raw.split("\n---\n");
+	const truncated = blocks.map((block) => {
+		const idx = block.indexOf("Highlights:\n");
+		if (idx === -1) return block;
+		const header = block.slice(0, idx + "Highlights:\n".length);
+		let highlights = block.slice(idx + "Highlights:\n".length);
+		if (highlights.length > MAX_HIGHLIGHTS_CHARS) {
+			highlights = `${highlights.slice(0, MAX_HIGHLIGHTS_CHARS).trimEnd()}…`;
+		}
+		return header + highlights;
+	});
+	return truncated.join("\n---\n");
+}
+
+function context7HttpError(status: number, operation: string, libraryId?: string) {
+	if (status === 401) {
+		return {
+			content: [
+				{
+					type: "text" as const,
+					text: "Error: Invalid CONTEXT7_API_KEY. Get a free key at https://context7.com/dashboard",
+				},
+			],
+			details: { operation, error: "auth" },
+		};
+	}
+	if (status === 404 && libraryId) {
+		return {
+			content: [
+				{
+					type: "text" as const,
+					text: `Error: Library not found: ${libraryId}\n\nUse operation: "resolve" first to find the correct ID.`,
+				},
+			],
+			details: { operation, error: "not_found" },
+		};
+	}
+	if (status === 429) {
+		return {
+			content: [
+				{
+					type: "text" as const,
+					text: "Error: Rate limit exceeded. Get a free API key at https://context7.com/dashboard for higher limits.",
+				},
+			],
+			details: { operation, error: "rate_limit" },
+		};
+	}
+	return {
+		content: [{ type: "text" as const, text: `Error: Context7 API returned ${status}` }],
+		details: { operation, error: `http_${status}` },
+	};
+}
+
+// ===========================================================================
 // Extension entry point
 // ===========================================================================
 
 export default function piSearchExtension(pi: { registerTool: (tool: Record<string, unknown>) => void }): void {
+	const config = loadConfig();
+	const disabled = new Set(config.disabledTools ?? []);
+
 	// -----------------------------------------------------------------------
 	// Tool 1: grepsearch — GitHub code search via grep.app
 	// -----------------------------------------------------------------------
 
-	pi.registerTool({
-		name: "grepsearch",
-		label: "Grep Search",
-		description: `Search real-world code examples from GitHub repositories via grep.app.
+	if (!disabled.has("grepsearch"))
+		pi.registerTool({
+			name: "grepsearch",
+			label: "Grep Search",
+			description: `Search real-world code examples from GitHub repositories via grep.app.
 
 Use when:
 - Implementing unfamiliar APIs - see how others use a library
@@ -189,189 +297,193 @@ Examples:
   grepsearch({ query: "getServerSession", language: "TypeScript" })
   grepsearch({ query: "CORS(", language: "Python", repo: "flask" })
   grepsearch({ query: "export async function POST", path: "route.ts" })`,
-		promptSnippet: "Search real-world code examples from GitHub repos via grep.app.",
+			promptSnippet: "Search real-world code examples from GitHub repos via grep.app.",
 
-		parameters: Type.Object({
-			query: Type.String({ description: "Code pattern to search for (literal text)" }),
-			language: Type.Optional(
-				Type.String({ description: "Filter by language: TypeScript, TSX, Python, Go, Rust, etc." }),
-			),
-			repo: Type.Optional(Type.String({ description: "Filter by repo: 'owner/repo' or partial match" })),
-			path: Type.Optional(Type.String({ description: "Filter by file path: 'src/', '.test.ts', etc." })),
-			limit: Type.Optional(Type.Number({ description: "Max results to return (default: 10, max: 20)" })),
-		}),
+			parameters: Type.Object({
+				query: Type.String({ description: "Code pattern to search for (literal text)" }),
+				language: Type.Optional(
+					Type.String({ description: "Filter by language: TypeScript, TSX, Python, Go, Rust, etc." }),
+				),
+				repo: Type.Optional(Type.String({ description: "Filter by repo: 'owner/repo' or partial match" })),
+				path: Type.Optional(Type.String({ description: "Filter by file path: 'src/', '.test.ts', etc." })),
+				limit: Type.Optional(Type.Number({ description: "Max results to return (default: 10, max: 20)" })),
+			}),
 
-		async execute(
-			_toolCallId: string,
-			params: { query: string; language?: string; repo?: string; path?: string; limit?: number },
-			_signal: AbortSignal,
-		) {
-			const { query, language, repo, path, limit = 10 } = params;
+			async execute(
+				_toolCallId: string,
+				params: { query: string; language?: string; repo?: string; path?: string; limit?: number },
+				signal: AbortSignal,
+			) {
+				const { query, language, repo, path, limit = 10 } = params;
 
-			if (!query?.trim()) {
-				return {
-					content: [{ type: "text" as const, text: "Error: query is required" }],
-					details: { error: "query required" },
-				};
-			}
-
-			const url = new URL(GREP_APP_API);
-			url.searchParams.set("q", query);
-			if (language) url.searchParams.set("filter[lang][0]", language);
-			if (repo) url.searchParams.set("filter[repo][0]", repo);
-			if (path) url.searchParams.set("filter[path][0]", path);
-
-			try {
-				const response = await fetch(url.toString(), {
-					headers: { Accept: "application/json", "User-Agent": USER_AGENT },
-				});
-
-				if (!response.ok) {
+				if (!query?.trim()) {
 					return {
-						content: [{ type: "text" as const, text: `Error: grep.app API returned ${response.status}` }],
-						details: { error: `http_${response.status}` },
+						content: [{ type: "text" as const, text: "Error: query is required" }],
+						details: { error: "query required" },
 					};
 				}
 
-				const data = (await response.json()) as GrepResponse;
+				const url = new URL(GREP_APP_API);
+				url.searchParams.set("q", query);
+				if (language) url.searchParams.set("filter[lang][0]", language);
+				if (repo) url.searchParams.set("filter[repo][0]", repo);
+				if (path) url.searchParams.set("filter[path][0]", path);
 
-				if (!data.hits?.hits?.length) {
+				try {
+					const response = await fetch(url.toString(), {
+						headers: { Accept: "application/json", "User-Agent": USER_AGENT },
+						signal,
+					});
+
+					if (!response.ok) {
+						return {
+							content: [{ type: "text" as const, text: `Error: grep.app API returned ${response.status}` }],
+							details: { error: `http_${response.status}` },
+						};
+					}
+
+					const data = (await response.json()) as GrepResponse;
+
+					if (!data.hits?.hits?.length) {
+						return {
+							content: [
+								{
+									type: "text" as const,
+									text: `No results found for: ${query}${language ? ` (${language})` : ""}`,
+								},
+							],
+							details: { query, results: 0 },
+						};
+					}
+
+					const maxResults = Math.min(limit, 20);
+					const results = data.hits.hits.slice(0, maxResults);
+
+					const formatted = results.map((hit, i) => {
+						const repoName = hit.repo || "unknown";
+						const filePath = hit.path || "unknown";
+						const cleanCode = cleanSnippet(hit.content?.snippet || "");
+						return `## ${i + 1}. ${repoName}\n**File**: ${filePath}\n\`\`\`\n${cleanCode}\n\`\`\``;
+					});
+
 					return {
 						content: [
 							{
 								type: "text" as const,
-								text: `No results found for: ${query}${language ? ` (${language})` : ""}`,
+								text: `Found ${data.hits.hits.length} results (showing ${results.length}) in ${data.time}ms:\n\n${formatted.join("\n\n")}`,
 							},
 						],
-						details: { query, results: 0 },
+						details: { query, language, totalResults: data.hits.hits.length, shown: results.length, timeMs: data.time },
+					};
+				} catch (error: unknown) {
+					const message = errorMessage(error);
+					return {
+						content: [{ type: "text" as const, text: `Error searching grep.app: ${message}` }],
+						details: { error: message },
 					};
 				}
-
-				const maxResults = Math.min(limit, 20);
-				const results = data.hits.hits.slice(0, maxResults);
-
-				const formatted = results.map((hit, i) => {
-					const repoName = hit.repo || "unknown";
-					const filePath = hit.path || "unknown";
-					const cleanCode = cleanSnippet(hit.content?.snippet || "");
-					return `## ${i + 1}. ${repoName}\n**File**: ${filePath}\n\`\`\`\n${cleanCode}\n\`\`\``;
-				});
-
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: `Found ${data.hits.hits.length} results (showing ${results.length}) in ${data.time}ms:\n\n${formatted.join("\n\n")}`,
-						},
-					],
-					details: { query, language, totalResults: data.hits.hits.length, shown: results.length, timeMs: data.time },
-				};
-			} catch (error: unknown) {
-				const message = error instanceof Error ? error.message : String(error);
-				return {
-					content: [{ type: "text" as const, text: `Error searching grep.app: ${message}` }],
-					details: { error: message },
-				};
-			}
-		},
-	});
+			},
+		});
 
 	// -----------------------------------------------------------------------
 	// Tool 2: websearch — Real-time web search via Exa AI
 	// -----------------------------------------------------------------------
 
-	pi.registerTool({
-		name: "websearch",
-		label: "Web Search",
-		description:
-			"Search the web using Exa AI. Returns relevant results with content snippets. Use for current information, documentation, blog posts, discussions. No API key required.",
-		promptSnippet: "Search the web via Exa AI for current information, docs, and discussions.",
+	if (!disabled.has("websearch"))
+		pi.registerTool({
+			name: "websearch",
+			label: "Web Search",
+			description:
+				"Search the web using Exa AI. Returns relevant results with content snippets. Use for current information, documentation, blog posts, discussions. No API key required.",
+			promptSnippet: "Search the web via Exa AI for current information, docs, and discussions.",
 
-		parameters: Type.Object({
-			query: Type.String({ description: "Search query (be specific for better results)" }),
-			numResults: Type.Optional(Type.Number({ description: "Number of results (default 8, max 20)" })),
-			type: Type.Optional(
-				Type.String({ description: '"auto" (default), "neural" (semantic), or "keyword" (exact match)' }),
-			),
-		}),
+			parameters: Type.Object({
+				query: Type.String({ description: "Search query (be specific for better results)" }),
+				numResults: Type.Optional(Type.Number({ description: "Number of results (default 8, max 20)" })),
+				type: Type.Optional(
+					Type.String({ description: '"auto" (default), "neural" (semantic), or "keyword" (exact match)' }),
+				),
+			}),
 
-		async execute(
-			_toolCallId: string,
-			params: { query: string; numResults?: number; type?: string },
-			signal: AbortSignal,
-		) {
-			try {
-				const result = await callExaMCP(
-					"web_search_exa",
-					{
-						query: params.query,
-						numResults: Math.min(params.numResults ?? 8, 20),
-						type: params.type ?? "auto",
-						livecrawl: "fallback",
-						textContentsOptions: { maxCharacters: 3000 },
-					},
-					signal,
-					25_000,
-				);
-				return { content: [{ type: "text" as const, text: result }], details: {} };
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				return { content: [{ type: "text" as const, text: `Web search failed: ${msg}` }], details: {} };
-			}
-		},
-	});
+			async execute(
+				_toolCallId: string,
+				params: { query: string; numResults?: number; type?: string },
+				signal: AbortSignal,
+			) {
+				try {
+					const result = await callExaMCP(
+						"web_search_exa",
+						{
+							query: params.query,
+							numResults: Math.min(params.numResults ?? 8, 20),
+							type: params.type ?? "auto",
+							livecrawl: "fallback",
+							textContentsOptions: { maxCharacters: 3000 },
+						},
+						signal,
+						25_000,
+					);
+					return { content: [{ type: "text" as const, text: truncateExaResults(result) }], details: {} };
+				} catch (err) {
+					const msg = errorMessage(err);
+					return { content: [{ type: "text" as const, text: `Web search failed: ${msg}` }], details: {} };
+				}
+			},
+		});
 
 	// -----------------------------------------------------------------------
 	// Tool 3: codesearch — Technical doc/example search via Exa AI web search
 	// -----------------------------------------------------------------------
 
-	pi.registerTool({
-		name: "codesearch",
-		label: "Code Search",
-		description:
-			"Search for programming documentation, code examples, and API references using Exa AI. Tuned for technical queries and implemented on top of Exa web search because the public MCP endpoint does not currently expose a dedicated code-search tool. No API key required.",
-		promptSnippet: "Search technical docs and API references via Exa AI.",
+	if (!disabled.has("codesearch"))
+		pi.registerTool({
+			name: "codesearch",
+			label: "Code Search",
+			description:
+				"Search for programming documentation, code examples, and API references using Exa AI. Tuned for technical queries and implemented on top of Exa web search because the public MCP endpoint does not currently expose a dedicated code-search tool. No API key required.",
+			promptSnippet: "Search technical docs and API references via Exa AI.",
 
-		parameters: Type.Object({
-			query: Type.String({
-				description: 'Code/API query (e.g. "React useState hook examples", "Go context.WithCancel usage")',
+			parameters: Type.Object({
+				query: Type.String({
+					description: 'Code/API query (e.g. "React useState hook examples", "Go context.WithCancel usage")',
+				}),
+				numResults: Type.Optional(Type.Number({ description: "Number of results (default 5, max 10)" })),
 			}),
-			numResults: Type.Optional(Type.Number({ description: "Number of results (default 5, max 10)" })),
-		}),
 
-		async execute(_toolCallId: string, params: { query: string; numResults?: number }, signal: AbortSignal) {
-			try {
-				const result = await callExaMCP(
-					"web_search_exa",
-					{
-						query: `programming documentation, API reference, code examples, official docs, GitHub examples for: ${params.query}`,
-						numResults: Math.min(params.numResults ?? 5, 10),
-					},
-					signal,
-					30_000,
-				);
-				return {
-					content: [{ type: "text" as const, text: result }],
-					details: { backend: "web_search_exa" },
-				};
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				return {
-					content: [{ type: "text" as const, text: `Code search failed: ${msg}` }],
-					details: { backend: "web_search_exa" },
-				};
-			}
-		},
-	});
+			async execute(_toolCallId: string, params: { query: string; numResults?: number }, signal: AbortSignal) {
+				try {
+					const result = await callExaMCP(
+						"web_search_exa",
+						{
+							query: `programming documentation, API reference, code examples, official docs, GitHub examples for: ${params.query}`,
+							numResults: Math.min(params.numResults ?? 5, 10),
+						},
+						signal,
+						30_000,
+					);
+					return {
+						content: [{ type: "text" as const, text: truncateExaResults(result) }],
+						details: { backend: "web_search_exa" },
+					};
+				} catch (err) {
+					const msg = errorMessage(err);
+					return {
+						content: [{ type: "text" as const, text: `Code search failed: ${msg}` }],
+						details: { backend: "web_search_exa" },
+					};
+				}
+			},
+		});
 
 	// -----------------------------------------------------------------------
 	// Tool 4: context7 — Documentation lookup
 	// -----------------------------------------------------------------------
 
-	pi.registerTool({
-		name: "context7",
-		label: "Context7",
-		description: `Context7 documentation lookup: resolve library IDs and query docs.
+	if (!disabled.has("context7"))
+		pi.registerTool({
+			name: "context7",
+			label: "Context7",
+			description: `Context7 documentation lookup: resolve library IDs and query docs.
 
 Operations:
 - "resolve": Find library ID from name (e.g., "react" → "/reactjs/react.dev")
@@ -380,270 +492,253 @@ Operations:
 Example:
 context7({ operation: "resolve", libraryName: "react" })
 context7({ operation: "query", libraryId: "/reactjs/react.dev", topic: "hooks" })`,
-		promptSnippet: "Library documentation lookup — resolve library IDs and query docs.",
+			promptSnippet: "Library documentation lookup — resolve library IDs and query docs.",
 
-		parameters: Type.Object({
-			operation: Type.Optional(
-				Type.Union([Type.Literal("resolve"), Type.Literal("query")], {
-					description: 'Operation to perform (default: "resolve")',
-				}),
-			),
-			libraryName: Type.Optional(Type.String({ description: "Library name to resolve (for resolve operation)" })),
-			libraryId: Type.Optional(Type.String({ description: "Library ID from resolve (for query operation)" })),
-			topic: Type.Optional(Type.String({ description: "Documentation topic (for query operation)" })),
-		}),
+			parameters: Type.Object({
+				operation: Type.Optional(
+					Type.Union([Type.Literal("resolve"), Type.Literal("query")], {
+						description: 'Operation to perform (default: "resolve")',
+					}),
+				),
+				libraryName: Type.Optional(Type.String({ description: "Library name to resolve (for resolve operation)" })),
+				libraryId: Type.Optional(Type.String({ description: "Library ID from resolve (for query operation)" })),
+				topic: Type.Optional(Type.String({ description: "Documentation topic (for query operation)" })),
+				offset: Type.Optional(
+					Type.Number({ description: "Character offset to start reading from (for paginating long docs)" }),
+				),
+			}),
 
-		async execute(
-			_toolCallId: string,
-			params: {
-				operation?: "resolve" | "query";
-				libraryName?: string;
-				libraryId?: string;
-				topic?: string;
-			},
-			signal: AbortSignal,
-		) {
-			const operation = params.operation ?? "resolve";
-			const apiKey = process.env.CONTEXT7_API_KEY;
-			const headers: Record<string, string> = {
-				Accept: "application/json",
-				"User-Agent": USER_AGENT,
-			};
+			async execute(
+				_toolCallId: string,
+				params: {
+					operation?: "resolve" | "query";
+					libraryName?: string;
+					libraryId?: string;
+					topic?: string;
+					offset?: number;
+				},
+				signal: AbortSignal,
+			) {
+				const operation = params.operation ?? "resolve";
+				const apiKey = process.env.CONTEXT7_API_KEY;
+				const headers: Record<string, string> = {
+					Accept: "application/json",
+					"User-Agent": USER_AGENT,
+				};
 
-			if (apiKey) {
-				headers.Authorization = `Bearer ${apiKey}`;
-			}
+				if (apiKey) {
+					headers.Authorization = `Bearer ${apiKey}`;
+				}
 
-			if (operation === "resolve") {
-				const { libraryName } = params;
+				if (operation === "resolve") {
+					const { libraryName } = params;
 
-				if (!libraryName?.trim()) {
+					if (!libraryName?.trim()) {
+						return {
+							content: [
+								{
+									type: "text" as const,
+									text: "Error: libraryName is required for resolve operation",
+								},
+							],
+							details: { operation: "resolve", error: "libraryName required" },
+						};
+					}
+
+					try {
+						const url = new URL(`${CONTEXT7_API}/libs/search`);
+						url.searchParams.set("libraryName", libraryName);
+						url.searchParams.set("query", "documentation");
+
+						const response = await fetch(url.toString(), { headers, signal });
+
+						if (!response.ok) {
+							return context7HttpError(response.status, "resolve");
+						}
+
+						const data = (await response.json()) as Context7SearchResponse;
+						const libraries = data.results || [];
+
+						if (libraries.length === 0) {
+							return {
+								content: [
+									{
+										type: "text" as const,
+										text: `No libraries found matching: ${libraryName}\n\nTry:\n- Different library name\n- Check spelling\n- Use official package name`,
+									},
+								],
+								details: { operation: "resolve", query: libraryName, results: 0 },
+							};
+						}
+
+						const formatted = libraries
+							.slice(0, 5)
+							.map((lib, i) => {
+								const desc = lib.description ? `\n   ${lib.description.slice(0, 100)}...` : "";
+								const snippets = lib.totalSnippets ? ` (${lib.totalSnippets} snippets)` : "";
+								const score = lib.benchmarkScore ? ` [score: ${lib.benchmarkScore}]` : "";
+								return `${i + 1}. **${lib.title}** → \`${lib.id}\`${snippets}${score}${desc}`;
+							})
+							.join("\n\n");
+
+						return {
+							content: [
+								{
+									type: "text" as const,
+									text: `Found ${libraries.length} libraries matching "${libraryName}":\n\n${formatted}\n\n**Next step**: Use \`context7({ operation: "query", libraryId: "${libraries[0].id}", topic: "your topic" })\` to fetch documentation.`,
+								},
+							],
+							details: {
+								operation: "resolve",
+								query: libraryName,
+								results: libraries.length,
+								topResult: libraries[0].id,
+							},
+						};
+					} catch (error: unknown) {
+						if (error instanceof DOMException && error.name === "AbortError") {
+							return {
+								content: [{ type: "text" as const, text: "Request cancelled." }],
+								details: { operation: "resolve", error: "cancelled" },
+							};
+						}
+						const message = errorMessage(error);
+						return {
+							content: [{ type: "text" as const, text: `Error resolving library: ${message}` }],
+							details: { operation: "resolve", error: message },
+						};
+					}
+				}
+
+				const { libraryId, topic } = params;
+
+				if (!libraryId?.trim()) {
 					return {
 						content: [
 							{
 								type: "text" as const,
-								text: "Error: libraryName is required for resolve operation",
+								text: 'Error: libraryId is required (use operation: "resolve" first)',
 							},
 						],
-						details: { operation: "resolve", error: "libraryName required" },
+						details: { operation: "query", error: "libraryId required" },
+					};
+				}
+
+				if (!topic?.trim()) {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: "Error: topic is required (e.g., 'hooks', 'setup', 'API reference')",
+							},
+						],
+						details: { operation: "query", error: "topic required" },
 					};
 				}
 
 				try {
-					const url = new URL(`${CONTEXT7_API}/libs/search`);
-					url.searchParams.set("libraryName", libraryName);
-					url.searchParams.set("query", "documentation");
+					const url = new URL(`${CONTEXT7_API}/context`);
+					url.searchParams.set("libraryId", libraryId);
+					url.searchParams.set("query", topic);
 
-					const response = await fetch(url.toString(), { headers, signal });
+					const response = await fetch(url.toString(), {
+						headers: { ...headers, Accept: "text/plain" },
+						signal,
+					});
 
 					if (!response.ok) {
-						if (response.status === 401) {
-							return {
-								content: [
-									{
-										type: "text" as const,
-										text: "Error: Invalid CONTEXT7_API_KEY. Get a free key at https://context7.com/dashboard",
-									},
-								],
-								details: { operation: "resolve", error: "auth" },
-							};
-						}
-						if (response.status === 429) {
-							return {
-								content: [
-									{
-										type: "text" as const,
-										text: "Error: Rate limit exceeded. Get a free API key at https://context7.com/dashboard for higher limits.",
-									},
-								],
-								details: { operation: "resolve", error: "rate_limit" },
-							};
-						}
+						return context7HttpError(response.status, "query", libraryId);
+					}
+
+					const content = await response.text();
+
+					if (!content.trim()) {
 						return {
 							content: [
 								{
 									type: "text" as const,
-									text: `Error: Context7 API returned ${response.status}`,
+									text: `No documentation found for "${topic}" in ${libraryId}.\n\nTry:\n- Simpler terms (e.g., "useState" instead of "state management")\n- Different topic spelling\n- Broader topics like "API reference" or "getting started"`,
 								},
 							],
-							details: { operation: "resolve", error: `http_${response.status}` },
+							details: { operation: "query", libraryId, topic, results: 0 },
 						};
 					}
 
-					const data = (await response.json()) as Context7SearchResponse;
-					const libraries = data.results || [];
-
-					if (libraries.length === 0) {
-						return {
-							content: [
-								{
-									type: "text" as const,
-									text: `No libraries found matching: ${libraryName}\n\nTry:\n- Different library name\n- Check spelling\n- Use official package name`,
-								},
-							],
-							details: { operation: "resolve", query: libraryName, results: 0 },
-						};
-					}
-
-					const formatted = libraries
-						.slice(0, 5)
-						.map((lib, i) => {
-							const desc = lib.description ? `\n   ${lib.description.slice(0, 100)}...` : "";
-							const snippets = lib.totalSnippets ? ` (${lib.totalSnippets} snippets)` : "";
-							const score = lib.benchmarkScore ? ` [score: ${lib.benchmarkScore}]` : "";
-							return `${i + 1}. **${lib.title}** → \`${lib.id}\`${snippets}${score}${desc}`;
-						})
-						.join("\n\n");
+					const text = paginateText(
+						content,
+						params.offset ?? 0,
+						MAX_PAGE_CHARS,
+						`# Documentation: ${topic} (${libraryId})\n\n`,
+					);
 
 					return {
 						content: [
 							{
 								type: "text" as const,
-								text: `Found ${libraries.length} libraries matching "${libraryName}":\n\n${formatted}\n\n**Next step**: Use \`context7({ operation: "query", libraryId: "${libraries[0].id}", topic: "your topic" })\` to fetch documentation.`,
+								text,
 							},
 						],
-						details: {
-							operation: "resolve",
-							query: libraryName,
-							results: libraries.length,
-							topResult: libraries[0].id,
-						},
+						details: { operation: "query", libraryId, topic, length: content.length, offset: params.offset ?? 0 },
 					};
 				} catch (error: unknown) {
 					if (error instanceof DOMException && error.name === "AbortError") {
 						return {
 							content: [{ type: "text" as const, text: "Request cancelled." }],
-							details: { operation: "resolve", error: "cancelled" },
+							details: { operation: "query", error: "cancelled" },
 						};
 					}
-					const message = error instanceof Error ? error.message : String(error);
+					const message = errorMessage(error);
 					return {
-						content: [{ type: "text" as const, text: `Error resolving library: ${message}` }],
-						details: { operation: "resolve", error: message },
+						content: [{ type: "text" as const, text: `Error querying documentation: ${message}` }],
+						details: { operation: "query", error: message },
 					};
 				}
-			}
+			},
+		});
 
-			const { libraryId, topic } = params;
+	// -----------------------------------------------------------------------
+	// Tool 5: web_fetch — Fetch full page content via Exa
+	// -----------------------------------------------------------------------
 
-			if (!libraryId?.trim()) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: 'Error: libraryId is required (use operation: "resolve" first)',
-						},
-					],
-					details: { operation: "query", error: "libraryId required" },
-				};
-			}
+	if (!disabled.has("web_fetch"))
+		pi.registerTool({
+			name: "web_fetch",
+			label: "Web Fetch",
+			description: `Fetch a webpage's content as clean markdown via Exa.
 
-			if (!topic?.trim()) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: "Error: topic is required (e.g., 'hooks', 'setup', 'API reference')",
-						},
-					],
-					details: { operation: "query", error: "topic required" },
-				};
-			}
+Use after websearch/codesearch when you need the full content of a specific result.
+Supports any public URL. Output is truncated to ~10k characters. Use offset to paginate long pages.
 
-			try {
-				const url = new URL(`${CONTEXT7_API}/context`);
-				url.searchParams.set("libraryId", libraryId);
-				url.searchParams.set("query", topic);
+Example:
+  web_fetch({ url: "https://example.com/article" })
+  web_fetch({ url: "https://example.com/article", offset: 20000 })`,
+			promptSnippet: "Fetch full webpage content as markdown. Use after websearch to read a specific result.",
 
-				const response = await fetch(url.toString(), {
-					headers: { ...headers, Accept: "text/plain" },
-					signal,
-				});
+			parameters: Type.Object({
+				url: Type.String({ description: "The URL to fetch content from" }),
+				offset: Type.Optional(
+					Type.Number({ description: "Character offset to start reading from (for paginating long pages)" }),
+				),
+			}),
 
-				if (!response.ok) {
-					if (response.status === 401) {
-						return {
-							content: [
-								{
-									type: "text" as const,
-									text: "Error: Invalid CONTEXT7_API_KEY. Get a free key at https://context7.com/dashboard",
-								},
-							],
-							details: { operation: "query", error: "auth" },
-						};
-					}
-					if (response.status === 404) {
-						return {
-							content: [
-								{
-									type: "text" as const,
-									text: `Error: Library not found: ${libraryId}\n\nUse operation: "resolve" first to find the correct ID.`,
-								},
-							],
-							details: { operation: "query", error: "not_found" },
-						};
-					}
-					if (response.status === 429) {
-						return {
-							content: [
-								{
-									type: "text" as const,
-									text: "Error: Rate limit exceeded. Get a free API key at https://context7.com/dashboard for higher limits.",
-								},
-							],
-							details: { operation: "query", error: "rate_limit" },
-						};
-					}
+			async execute(_toolCallId: string, params: { url: string; offset?: number }, signal: AbortSignal) {
+				const { url } = params;
+				if (!url?.trim()) {
 					return {
-						content: [
-							{
-								type: "text" as const,
-								text: `Error: Context7 API returned ${response.status}`,
-							},
-						],
-						details: { operation: "query", error: `http_${response.status}` },
+						content: [{ type: "text" as const, text: "Error: url is required" }],
 					};
 				}
 
-				const content = await response.text();
-
-				if (!content.trim()) {
+				try {
+					const result = await callExaMCP("web_fetch_exa", { urls: [url] }, signal, 30_000);
+					const text = paginateText(result, params.offset ?? 0, MAX_PAGE_CHARS);
+					return { content: [{ type: "text" as const, text }] };
+				} catch (err) {
+					const msg = errorMessage(err);
 					return {
-						content: [
-							{
-								type: "text" as const,
-								text: `No documentation found for "${topic}" in ${libraryId}.\n\nTry:\n- Simpler terms (e.g., "useState" instead of "state management")\n- Different topic spelling\n- Broader topics like "API reference" or "getting started"`,
-							},
-						],
-						details: { operation: "query", libraryId, topic, results: 0 },
+						content: [{ type: "text" as const, text: `Fetch failed: ${msg}` }],
 					};
 				}
-
-				const maxLen = 50_000;
-				const truncated = content.length > maxLen ? `${content.slice(0, maxLen)}\n\n... (truncated)` : content;
-
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: `# Documentation: ${topic} (${libraryId})\n\n${truncated}`,
-						},
-					],
-					details: { operation: "query", libraryId, topic, length: content.length },
-				};
-			} catch (error: unknown) {
-				if (error instanceof DOMException && error.name === "AbortError") {
-					return {
-						content: [{ type: "text" as const, text: "Request cancelled." }],
-						details: { operation: "query", error: "cancelled" },
-					};
-				}
-				const message = error instanceof Error ? error.message : String(error);
-				return {
-					content: [{ type: "text" as const, text: `Error querying documentation: ${message}` }],
-					details: { operation: "query", error: message },
-				};
-			}
-		},
-	});
+			},
+		});
 }

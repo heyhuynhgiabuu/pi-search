@@ -39,7 +39,7 @@ const CONFIG_PATH = join(homedir(), ".pi", "agent", "pi-search.json");
 function loadConfig(): PiSearchConfig {
 	try {
 		const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-		if (raw.disabledTools && !Array.isArray(raw.disabledTools)) {
+		if (!Array.isArray(raw.disabledTools)) {
 			raw.disabledTools = [];
 		}
 		return raw;
@@ -202,11 +202,12 @@ function errorMessage(err: unknown): string {
 }
 
 function paginateText(content: string, offset: number, maxChars: number, header?: string): string {
-	const slice = content.slice(offset, offset + maxChars);
-	const remaining = content.length - offset - slice.length;
-	let text = header ? header + slice : slice;
+	const clamped = Math.max(0, Math.min(offset, content.length));
+	const slice = content.slice(clamped, clamped + maxChars);
+	const remaining = content.length - clamped - slice.length;
+	let text = header && clamped === 0 ? header + slice : slice;
 	if (remaining > 0) {
-		text += `\n\n… [${remaining} chars remaining — call again with offset: ${offset + maxChars} to continue]`;
+		text += `\n\n… [${remaining} chars remaining — call again with offset: ${clamped + maxChars} to continue]`;
 	}
 	return text;
 }
@@ -504,7 +505,7 @@ context7({ operation: "query", libraryId: "/reactjs/react.dev", topic: "hooks" }
 				libraryId: Type.Optional(Type.String({ description: "Library ID from resolve (for query operation)" })),
 				topic: Type.Optional(Type.String({ description: "Documentation topic (for query operation)" })),
 				offset: Type.Optional(
-					Type.Number({ description: "Character offset to start reading from (for paginating long docs)" }),
+					Type.Number({ description: "Character offset to start reading from (for paginating long docs)", minimum: 0 }),
 				),
 			}),
 
@@ -717,7 +718,10 @@ Example:
 			parameters: Type.Object({
 				url: Type.String({ description: "The URL to fetch content from" }),
 				offset: Type.Optional(
-					Type.Number({ description: "Character offset to start reading from (for paginating long pages)" }),
+					Type.Number({
+						description: "Character offset to start reading from (for paginating long pages)",
+						minimum: 0,
+					}),
 				),
 			}),
 

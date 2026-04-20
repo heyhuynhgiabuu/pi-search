@@ -1,6 +1,6 @@
 {
 	"name": "@heyhuynhgiabuu/pi-search",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Unified search toolkit for pi — web search, code search, docs lookup, and GitHub code search in one extension.",
 	"author": "huynhgiabuu",
 	"license": "MIT",

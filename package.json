@@ -1,7 +1,7 @@
 {
 	"name": "@heyhuynhgiabuu/pi-search",
-	"version": "0.2.2",
-	"description": "Unified search toolkit for pi — web search, code search, docs lookup, and GitHub code search in one extension.",
+	"version": "0.2.3",
+	"description": "Unified search toolkit for pi — web search, code search, docs lookup, and repo documentation in one extension.",
 	"author": "huynhgiabuu",
 	"license": "MIT",
 	"repository": {
@@ -24,9 +24,8 @@
 		"code-search",
 		"documentation",
 		"context7",
+		"deepwiki",
 		"exa",
-		"grepapp",
-		"grepsearch",
 		"websearch",
 		"codesearch"
 	],
@@ -45,8 +44,8 @@
 	"scripts": {
 		"build": "tsc",
 		"typecheck": "tsc --noEmit",
-		"lint": "biome check src/",
-		"lint:fix": "biome check --fix src/",
+		"lint": "biome check src/ tests/",
+		"lint:fix": "biome check --fix src/ tests/",
 		"test": "vitest run --passWithNoTests",
 		"test:watch": "vitest --passWithNoTests"
 	},

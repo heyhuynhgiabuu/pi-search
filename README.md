@@ -8,18 +8,19 @@ It combines:
 - real-time **web search** via Exa AI
 - **technical docs and API search** via Exa AI web search
 - **official documentation lookup** via Context7
-- **real-world GitHub code search** via grep.app
+- **public repository documentation and Q&A** via DeepWiki
+- **structured source citations** on Exa-backed retrieval tools
 
-The goal is simple: install one extension and get a practical research toolkit for current docs, code examples, library references, and production usage patterns.
+The goal is simple: install one extension and get a practical research toolkit for current docs, code examples, library references, and repository architecture.
 
 ## Tools
 
 | Tool | Source | Description |
 |------|--------|-------------|
-| **`grepsearch`** | [grep.app](https://grep.app) | Search real-world code on GitHub. Use literal patterns like `"useState("`, not keywords. |
 | **`websearch`** | [Exa AI](https://exa.ai) | Real-time web search. No API key required. |
 | **`codesearch`** | [Exa AI](https://exa.ai) | Technical doc/example search tuned for programming queries and powered by Exa web search. No API key required. |
 | **`context7`** | [Context7](https://context7.com) | Resolve library IDs and fetch library documentation. Optional `CONTEXT7_API_KEY` for higher rate limits. |
+| **`deepwiki`** | [DeepWiki](https://docs.devin.ai/work-with-devin/deepwiki-mcp) | Read generated docs and ask repo-grounded questions for public GitHub repositories. No API key required. |
 | **`web_fetch`** | [Exa AI](https://exa.ai) | Fetch a webpage's full content as clean markdown. Use after `websearch`/`codesearch` to read a specific result. |
 
 ## Install
@@ -52,18 +53,18 @@ Create `~/.pi/agent/pi-search.json` to customize the extension.
 }
 ```
 
-Valid tool names: `grepsearch`, `websearch`, `codesearch`, `context7`, `web_fetch`.
+Valid tool names: `websearch`, `codesearch`, `context7`, `deepwiki`, `web_fetch`.
 
 If the file doesn't exist or is invalid JSON, all tools are enabled by default.
 
 ## Usage
 
 ```ts
-grepsearch({ query: "getServerSession", language: "TypeScript" })
 websearch({ query: "Next.js 15 server actions" })
 codesearch({ query: "Go context.WithCancel usage" })
 context7({ operation: "resolve", libraryName: "react" })
 context7({ operation: "query", libraryId: "/reactjs/react.dev", topic: "hooks" })
+deepwiki({ operation: "ask", repo: "facebook/react", question: "How does reconciliation work?" })
 ```
 
 ## When to use which tool
@@ -71,7 +72,17 @@ context7({ operation: "query", libraryId: "/reactjs/react.dev", topic: "hooks" }
 - `websearch` → current information, blog posts, docs, release notes, discussions
 - `codesearch` → programming docs, API examples, framework usage, and technical references
 - `context7` → official library documentation after resolving the right library ID
-- `grepsearch` → how real repositories use an API in practice
+- `deepwiki` → generated documentation and Q&A for public GitHub repositories
+
+## DeepWiki limitations
+
+`deepwiki` uses Devin's public, no-auth DeepWiki MCP endpoint. It only supports public GitHub repositories. Treat results as generated documentation that can be incomplete or stale; use the repository source for exact code truth.
+
+## Citations
+
+`websearch`, `codesearch`, and `web_fetch` return source metadata in `details.citations` when source URLs are available. Their text output also includes a `## Sources` section with numbered source markers so the model can see the same source IDs that are exposed as structured metadata.
+
+Important limitation: these citations are attached to individual tool results. They do **not** prove which sources a final assistant response used unless the Pi host/runtime links assistant messages to tool calls and tool result details.
 
 ## Development
 

@@ -5,14 +5,15 @@
  * @see https://github.com/buddingnewinsights/pi-search
  *
  * Tools:
- *   • grepsearch — Search real-world code on GitHub via grep.app
+
  *   • websearch  — Real-time web search via Exa AI (no API key)
  *   • codesearch — Technical doc/example search via Exa AI web search (no API key)
  *   • context7   — Resolve library IDs and query official documentation
+ *   • deepwiki   — Query DeepWiki's public GitHub repository documentation
  *
  * Architecture:
  *   Single extension entry point registers all tools.
- *   grep.app and Context7 use plain REST. Exa uses JSON-RPC 2.0 over SSE.
+ * Context7 and DeepWiki use JSON-RPC 2.0 MCP. Exa uses JSON-RPC 2.0 MCP over HTTP/SSE.
  *   codesearch is implemented on top of Exa web search because the current public MCP endpoint exposes
  *   web tools (`web_search_exa`, `web_fetch_exa`) but not the older dedicated code-context tool.
  *   Zero runtime dependencies beyond @sinclair/typebox for param schemas.
@@ -27,7 +28,7 @@ import { Type } from "@sinclair/typebox";
 // Config
 // ===========================================================================
 
-const TOOL_NAMES = ["grepsearch", "websearch", "codesearch", "context7", "web_fetch"] as const;
+const TOOL_NAMES = ["websearch", "codesearch", "context7", "deepwiki", "web_fetch"] as const;
 type ToolName = (typeof TOOL_NAMES)[number];
 
 interface PiSearchConfig {
@@ -52,26 +53,10 @@ function loadConfig(): PiSearchConfig {
 // Constants
 // ===========================================================================
 
-const GREP_APP_API = "https://grep.app/api/search";
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
+const DEEPWIKI_MCP_URL = "https://mcp.deepwiki.com/mcp";
 const CONTEXT7_API = "https://context7.com/api/v2";
 const USER_AGENT = "pi-search/1.0";
-
-// ===========================================================================
-// Types
-// ===========================================================================
-
-interface GrepHit {
-	repo: string;
-	path: string;
-	content: { snippet: string };
-	total_matches: string;
-}
-
-interface GrepResponse {
-	hits: { hits: GrepHit[] };
-	time: number;
-}
 
 interface Context7LibraryInfo {
 	id: string;
@@ -85,8 +70,53 @@ interface Context7SearchResponse {
 	results: Context7LibraryInfo[];
 }
 
+interface Citation {
+	id: string;
+	title?: string;
+	url: string;
+	source: "exa" | "context7";
+	snippet?: string;
+}
+
+interface ExaMCPResult {
+	text: string;
+	citations: Citation[];
+}
+
+type DeepWikiOperation = "structure" | "contents" | "ask";
+type DeepWikiToolName = "read_wiki_structure" | "read_wiki_contents" | "ask_question";
+
 // ===========================================================================
-// Shared: Exa MCP caller (JSON-RPC 2.0 over SSE)
+// Shared: MCP response parsing
+// ===========================================================================
+
+function parseMcpMessages(text: string, contentType: string): Record<string, unknown>[] {
+	const parsed =
+		contentType.includes("application/json") || text.trimStart().startsWith("{")
+			? [JSON.parse(text)]
+			: text
+					.split("\n")
+					.filter((line) => line.startsWith("data:"))
+					.map((line) => line.slice(5).trim())
+					.filter(Boolean)
+					.map((line) => JSON.parse(line));
+
+	return parsed.filter(isRecord);
+}
+
+function textFromMcpContent(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter(
+			(item): item is { type: string; text: string } =>
+				isRecord(item) && item.type === "text" && typeof item.text === "string",
+		)
+		.map((item) => item.text)
+		.join("\n");
+}
+
+// ===========================================================================
+// Shared: Exa MCP caller (JSON-RPC 2.0 over HTTP/SSE)
 // ===========================================================================
 
 async function callExaMCP(
@@ -94,7 +124,7 @@ async function callExaMCP(
 	args: Record<string, unknown>,
 	signal: AbortSignal,
 	timeoutMs = 30_000,
-): Promise<string> {
+): Promise<ExaMCPResult> {
 	const controller = new AbortController();
 	const combinedSignal = AbortSignal.any([signal, controller.signal]);
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -123,71 +153,203 @@ async function callExaMCP(
 		}
 
 		const text = await response.text();
-		const contentType = response.headers.get("content-type") ?? "";
+		const messages = parseMcpMessages(text, response.headers.get("content-type") ?? "");
 
-		// Try direct JSON first
-		if (contentType.includes("application/json") || text.startsWith("{")) {
-			try {
-				const parsed = JSON.parse(text);
-				if (parsed.result?.content) {
-					return parsed.result.content
-						.filter((c: { type: string }) => c.type === "text")
-						.map((c: { text: string }) => c.text)
-						.join("\n");
-				}
-				if (parsed.error) {
-					throw new Error(`Exa error: ${parsed.error.message ?? JSON.stringify(parsed.error)}`);
-				}
-			} catch (e) {
-				if (!(e instanceof SyntaxError)) throw e;
+		for (const message of messages) {
+			const result = message.result;
+			if (isRecord(result) && result.content) {
+				return exaResultFromContent(result.content);
+			}
+			const error = message.error;
+			if (isRecord(error)) {
+				throw new Error(`Exa error: ${error.message ?? JSON.stringify(error)}`);
 			}
 		}
 
-		// Fall back to SSE parsing
-		const dataLines = text
-			.split("\n")
-			.filter((line) => line.startsWith("data:"))
-			.map((line) => line.slice(5).trim());
-
-		for (const line of dataLines) {
-			try {
-				const parsed = JSON.parse(line);
-				if (parsed.result?.content) {
-					return parsed.result.content
-						.filter((c: { type: string }) => c.type === "text")
-						.map((c: { text: string }) => c.text)
-						.join("\n");
-				}
-				if (parsed.error) {
-					throw new Error(`Exa error: ${parsed.error.message ?? JSON.stringify(parsed.error)}`);
-				}
-			} catch (e) {
-				if (e instanceof SyntaxError) continue;
-				throw e;
-			}
-		}
-
-		return dataLines.join("\n") || text.slice(0, 5000);
+		const fallbackText = text.slice(0, 5000);
+		return { text: fallbackText, citations: extractCitationsFromText(fallbackText) };
 	} finally {
 		clearTimeout(timer);
 	}
 }
 
+function exaResultFromContent(content: unknown): ExaMCPResult {
+	if (!Array.isArray(content)) {
+		throw new Error(`Unsupported Exa content format: expected array, received ${typeof content}`);
+	}
+
+	const text = textFromMcpContent(content);
+	const structuredCitations = extractCitationsFromUnknown(content);
+	const fallbackCitations = extractCitationsFromText(text);
+	return { text, citations: mergeCitations([...structuredCitations, ...fallbackCitations]) };
+}
+
 // ===========================================================================
-// Shared: HTML entity cleanup for grep.app snippets
+// Shared: DeepWiki MCP caller (Streamable HTTP)
 // ===========================================================================
 
-function cleanSnippet(html: string): string {
-	return html
-		.replace(/<[^>]*>/g, "")
-		.replace(/&lt;/g, "<")
-		.replace(/&gt;/g, ">")
-		.replace(/&amp;/g, "&")
-		.replace(/&quot;/g, '"')
+async function callDeepWikiMCP(toolName: string, args: Record<string, unknown>, signal: AbortSignal): Promise<string> {
+	const body = JSON.stringify({
+		jsonrpc: "2.0",
+		id: 1,
+		method: "tools/call",
+		params: { name: toolName, arguments: args },
+	});
+
+	const response = await fetch(DEEPWIKI_MCP_URL, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Accept: "application/json, text/event-stream",
+			"User-Agent": USER_AGENT,
+		},
+		body,
+		signal,
+	});
+
+	if (!response.ok) {
+		throw new Error(`DeepWiki MCP returned ${response.status}: ${response.statusText}`);
+	}
+
+	const text = await response.text();
+	const messages = parseMcpMessages(text, response.headers.get("content-type") ?? "");
+
+	for (const message of messages) {
+		const result = message.result;
+		if (isRecord(result) && isRecord(result.structuredContent)) {
+			const structuredResult = result.structuredContent.result;
+			if (typeof structuredResult === "string") return structuredResult;
+		}
+		if (isRecord(result) && result.content) {
+			const contentResult = textFromMcpContent(result.content);
+			if (contentResult.trim()) return contentResult;
+		}
+		const error = message.error;
+		if (isRecord(error)) {
+			throw new Error(`DeepWiki error: ${error.message ?? JSON.stringify(error)}`);
+		}
+	}
+
+	return text;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function extractCitationsFromUnknown(value: unknown): Citation[] {
+	const citations: Citation[] = [];
+	const seenObjects = new WeakSet<object>();
+
+	function visit(node: unknown) {
+		if (Array.isArray(node)) {
+			for (const item of node) visit(item);
+			return;
+		}
+
+		if (!isRecord(node)) return;
+		if (seenObjects.has(node)) return;
+		seenObjects.add(node);
+
+		const url = stringField(node, ["url", "link"]);
+		if (url && isHttpUrl(url)) {
+			const title = stringField(node, ["title", "name"]);
+			const snippet = stringField(node, ["snippet", "text", "highlight", "summary"]);
+			citations.push(makeCitation(citations.length + 1, url, title, snippet));
+		}
+
+		for (const child of Object.values(node)) visit(child);
+	}
+
+	visit(value);
+	return mergeCitations(citations);
+}
+
+function extractCitationsFromText(text: string): Citation[] {
+	const blocks = text.split("\n---\n");
+	const citations: Citation[] = [];
+	for (const block of blocks) {
+		const url = matchField(block, "URL") ?? matchFirstHttpUrl(block);
+		if (!url || !isHttpUrl(url)) continue;
+		const title = matchField(block, "Title") ?? firstNonEmptyLine(block);
+		const snippet = matchHighlights(block) ?? undefined;
+		citations.push(makeCitation(citations.length + 1, url, title, snippet));
+	}
+	return mergeCitations(citations);
+}
+
+function makeCitation(index: number, url: string, title?: string, snippet?: string): Citation {
+	return {
+		id: `exa-${index}`,
+		title: title?.trim() || undefined,
+		url,
+		source: "exa",
+		snippet: snippet?.trim().slice(0, MAX_HIGHLIGHTS_CHARS) || undefined,
+	};
+}
+
+function stringField(record: Record<string, unknown>, keys: string[]): string | undefined {
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string" && value.trim()) return value.trim();
+	}
+	return undefined;
+}
+
+function matchField(text: string, field: string): string | undefined {
+	const match = text.match(new RegExp(`^${field}:\\s*(.+)$`, "im"));
+	return match?.[1]?.trim();
+}
+
+function matchHighlights(text: string): string | undefined {
+	const idx = text.indexOf("Highlights:\n");
+	if (idx === -1) return undefined;
+	return text.slice(idx + "Highlights:\n".length).trim();
+}
+
+function matchFirstHttpUrl(text: string): string | undefined {
+	return text.match(/https?:\/\/[^\s)]+/)?.[0];
+}
+
+function firstNonEmptyLine(text: string): string | undefined {
+	return text
 		.split("\n")
-		.slice(0, 8)
-		.join("\n")
-		.trim();
+		.map((line) => line.trim())
+		.find(Boolean);
+}
+
+function isHttpUrl(url: string): boolean {
+	try {
+		const parsed = new URL(url);
+		return parsed.protocol === "http:" || parsed.protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+
+function mergeCitations(citations: Citation[]): Citation[] {
+	const byUrl = new Map<string, Citation>();
+	for (const citation of citations) {
+		const existing = byUrl.get(citation.url);
+		if (!existing) {
+			byUrl.set(citation.url, citation);
+			continue;
+		}
+		byUrl.set(citation.url, {
+			...existing,
+			title: existing.title ?? citation.title,
+			snippet: existing.snippet ?? citation.snippet,
+		});
+	}
+	return [...byUrl.values()].map((citation, index) => ({ ...citation, id: `exa-${index + 1}` }));
+}
+
+function formatCitationMarkers(text: string, citations: Citation[]): string {
+	if (citations.length === 0) return text;
+	const lines = citations.map(
+		(citation, index) => `[${index + 1}] ${citation.title ?? citation.url}\nURL: ${citation.url}`,
+	);
+	return `${text}\n\n## Sources\n${lines.join("\n\n")}`;
 }
 
 // ===========================================================================
@@ -276,116 +438,6 @@ export default function piSearchExtension(pi: { registerTool: (tool: Record<stri
 	const disabled = new Set(config.disabledTools ?? []);
 
 	// -----------------------------------------------------------------------
-	// Tool 1: grepsearch — GitHub code search via grep.app
-	// -----------------------------------------------------------------------
-
-	if (!disabled.has("grepsearch"))
-		pi.registerTool({
-			name: "grepsearch",
-			label: "Grep Search",
-			description: `Search real-world code examples from GitHub repositories via grep.app.
-
-Use when:
-- Implementing unfamiliar APIs - see how others use a library
-- Looking for production patterns - find real-world examples
-- Understanding library integrations - see how things work together
-
-IMPORTANT: Search for **literal code patterns**, not keywords:
-Good: "useState(", "import React from", "async function"
-Bad: "react tutorial", "best practices", "how to use"
-
-Examples:
-  grepsearch({ query: "getServerSession", language: "TypeScript" })
-  grepsearch({ query: "CORS(", language: "Python", repo: "flask" })
-  grepsearch({ query: "export async function POST", path: "route.ts" })`,
-			promptSnippet: "Search real-world code examples from GitHub repos via grep.app.",
-
-			parameters: Type.Object({
-				query: Type.String({ description: "Code pattern to search for (literal text)" }),
-				language: Type.Optional(
-					Type.String({ description: "Filter by language: TypeScript, TSX, Python, Go, Rust, etc." }),
-				),
-				repo: Type.Optional(Type.String({ description: "Filter by repo: 'owner/repo' or partial match" })),
-				path: Type.Optional(Type.String({ description: "Filter by file path: 'src/', '.test.ts', etc." })),
-				limit: Type.Optional(Type.Number({ description: "Max results to return (default: 10, max: 20)" })),
-			}),
-
-			async execute(
-				_toolCallId: string,
-				params: { query: string; language?: string; repo?: string; path?: string; limit?: number },
-				signal: AbortSignal,
-			) {
-				const { query, language, repo, path, limit = 10 } = params;
-
-				if (!query?.trim()) {
-					return {
-						content: [{ type: "text" as const, text: "Error: query is required" }],
-						details: { error: "query required" },
-					};
-				}
-
-				const url = new URL(GREP_APP_API);
-				url.searchParams.set("q", query);
-				if (language) url.searchParams.set("filter[lang][0]", language);
-				if (repo) url.searchParams.set("filter[repo][0]", repo);
-				if (path) url.searchParams.set("filter[path][0]", path);
-
-				try {
-					const response = await fetch(url.toString(), {
-						headers: { Accept: "application/json", "User-Agent": USER_AGENT },
-						signal,
-					});
-
-					if (!response.ok) {
-						return {
-							content: [{ type: "text" as const, text: `Error: grep.app API returned ${response.status}` }],
-							details: { error: `http_${response.status}` },
-						};
-					}
-
-					const data = (await response.json()) as GrepResponse;
-
-					if (!data.hits?.hits?.length) {
-						return {
-							content: [
-								{
-									type: "text" as const,
-									text: `No results found for: ${query}${language ? ` (${language})` : ""}`,
-								},
-							],
-							details: { query, results: 0 },
-						};
-					}
-
-					const maxResults = Math.min(limit, 20);
-					const results = data.hits.hits.slice(0, maxResults);
-
-					const formatted = results.map((hit, i) => {
-						const repoName = hit.repo || "unknown";
-						const filePath = hit.path || "unknown";
-						const cleanCode = cleanSnippet(hit.content?.snippet || "");
-						return `## ${i + 1}. ${repoName}\n**File**: ${filePath}\n\`\`\`\n${cleanCode}\n\`\`\``;
-					});
-
-					return {
-						content: [
-							{
-								type: "text" as const,
-								text: `Found ${data.hits.hits.length} results (showing ${results.length}) in ${data.time}ms:\n\n${formatted.join("\n\n")}`,
-							},
-						],
-						details: { query, language, totalResults: data.hits.hits.length, shown: results.length, timeMs: data.time },
-					};
-				} catch (error: unknown) {
-					const message = errorMessage(error);
-					return {
-						content: [{ type: "text" as const, text: `Error searching grep.app: ${message}` }],
-						details: { error: message },
-					};
-				}
-			},
-		});
-
 	// -----------------------------------------------------------------------
 	// Tool 2: websearch — Real-time web search via Exa AI
 	// -----------------------------------------------------------------------
@@ -424,7 +476,13 @@ Examples:
 						signal,
 						25_000,
 					);
-					return { content: [{ type: "text" as const, text: truncateExaResults(result) }], details: {} };
+					const citations = result.citations;
+					return {
+						content: [
+							{ type: "text" as const, text: formatCitationMarkers(truncateExaResults(result.text), citations) },
+						],
+						details: { citations },
+					};
 				} catch (err) {
 					const msg = errorMessage(err);
 					return { content: [{ type: "text" as const, text: `Web search failed: ${msg}` }], details: {} };
@@ -462,9 +520,12 @@ Examples:
 						signal,
 						30_000,
 					);
+					const citations = result.citations;
 					return {
-						content: [{ type: "text" as const, text: truncateExaResults(result) }],
-						details: { backend: "web_search_exa" },
+						content: [
+							{ type: "text" as const, text: formatCitationMarkers(truncateExaResults(result.text), citations) },
+						],
+						details: { backend: "web_search_exa", citations },
 					};
 				} catch (err) {
 					const msg = errorMessage(err);
@@ -698,7 +759,107 @@ context7({ operation: "query", libraryId: "/reactjs/react.dev", topic: "hooks" }
 		});
 
 	// -----------------------------------------------------------------------
-	// Tool 5: web_fetch — Fetch full page content via Exa
+	// Tool 5: deepwiki — Public GitHub repository docs via DeepWiki MCP
+	// -----------------------------------------------------------------------
+
+	if (!disabled.has("deepwiki"))
+		pi.registerTool({
+			name: "deepwiki",
+			label: "DeepWiki",
+			description: `Query DeepWiki's public GitHub repository documentation via the official DeepWiki MCP server.
+
+Use when:
+- You need a repository-specific documentation overview
+- You want to ask questions about a public GitHub repo
+- You need generated docs for unfamiliar open-source codebases
+
+Operations:
+- "structure" — list documentation topics for a repo
+- "contents" — read generated documentation for a repo
+- "ask" — ask a repo-grounded question
+
+Limitations: public GitHub repositories only; generated docs may be incomplete or stale. Use the repository source for exact code truth.
+
+Examples:
+  deepwiki({ operation: "structure", repo: "facebook/react" })
+  deepwiki({ operation: "contents", repo: "facebook/react" })
+  deepwiki({ operation: "ask", repo: "facebook/react", question: "How does reconciliation work?" })`,
+			promptSnippet: "Query DeepWiki's public GitHub repository documentation and Q&A.",
+
+			parameters: Type.Object({
+				operation: Type.Optional(
+					Type.Union([Type.Literal("structure"), Type.Literal("contents"), Type.Literal("ask")], {
+						description: 'Operation to perform (default: "ask" when question is provided, otherwise "contents")',
+					}),
+				),
+				repo: Type.String({ description: 'GitHub repository in "owner/name" format' }),
+				question: Type.Optional(Type.String({ description: 'Question to ask for operation: "ask"' })),
+			}),
+
+			async execute(
+				_toolCallId: string,
+				params: { operation?: DeepWikiOperation; repo: string; question?: string },
+				signal: AbortSignal,
+			) {
+				const repo = params.repo?.trim();
+				if (!repo) {
+					return {
+						content: [{ type: "text" as const, text: 'Error: repo is required in "owner/name" format' }],
+						details: { error: "repo required" },
+					};
+				}
+
+				if (!/^[^\s/]+\/[^\s/]+$/.test(repo)) {
+					return {
+						content: [
+							{ type: "text" as const, text: 'Error: repo must be in "owner/name" format, e.g. "facebook/react"' },
+						],
+						details: { error: "invalid repo", repo },
+					};
+				}
+
+				const operation = params.operation ?? (params.question?.trim() ? "ask" : "contents");
+				let toolName: DeepWikiToolName;
+				let args: Record<string, unknown>;
+
+				if (operation === "structure") {
+					toolName = "read_wiki_structure";
+					args = { repoName: repo };
+				} else if (operation === "contents") {
+					toolName = "read_wiki_contents";
+					args = { repoName: repo };
+				} else {
+					const question = params.question?.trim();
+					if (!question) {
+						return {
+							content: [{ type: "text" as const, text: 'Error: question is required for operation: "ask"' }],
+							details: { operation, repo, error: "question required" },
+						};
+					}
+					toolName = "ask_question";
+					args = { repoName: repo, question };
+				}
+
+				try {
+					const text = await callDeepWikiMCP(toolName, args, signal);
+					return {
+						content: [
+							{ type: "text" as const, text: paginateText(text, 0, MAX_PAGE_CHARS, `# DeepWiki: ${repo}\n\n`) },
+						],
+						details: { operation, repo, backend: "deepwiki_mcp", toolName },
+					};
+				} catch (err) {
+					const msg = errorMessage(err);
+					return {
+						content: [{ type: "text" as const, text: `DeepWiki failed: ${msg}` }],
+						details: { operation, repo, backend: "deepwiki_mcp", toolName, error: msg },
+					};
+				}
+			},
+		});
+
+	// -----------------------------------------------------------------------
+	// Tool 6: web_fetch — Fetch full page content via Exa
 	// -----------------------------------------------------------------------
 
 	if (!disabled.has("web_fetch"))
@@ -735,8 +896,15 @@ Example:
 
 				try {
 					const result = await callExaMCP("web_fetch_exa", { urls: [url] }, signal, 30_000);
-					const text = paginateText(result, params.offset ?? 0, MAX_PAGE_CHARS);
-					return { content: [{ type: "text" as const, text }] };
+					const citations = mergeCitations([
+						...result.citations,
+						{ id: "exa-1", url, source: "exa" as const, title: matchField(result.text, "Title") },
+					]);
+					const text = paginateText(result.text, params.offset ?? 0, MAX_PAGE_CHARS);
+					return {
+						content: [{ type: "text" as const, text: formatCitationMarkers(text, citations) }],
+						details: { citations },
+					};
 				} catch (err) {
 					const msg = errorMessage(err);
 					return {

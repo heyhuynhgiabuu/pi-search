@@ -1,27 +1,17 @@
-# pi-search
+# @heyhuynhgiabuu/pi-search
 
-[![npm version](https://img.shields.io/npm/v/@heyhuynhgiabuu/pi-search)](https://www.npmjs.com/package/@heyhuynhgiabuu/pi-search)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/heyhuynhgiabuu/pi-search/main/package.json&query=%24.version&label=version&style=for-the-badge)](https://github.com/heyhuynhgiabuu/pi-search/blob/main/package.json)
+[![CI](https://img.shields.io/github/actions/workflow/status/heyhuynhgiabuu/pi-search/ci.yml?branch=main&label=CI&style=for-the-badge)](https://github.com/heyhuynhgiabuu/pi-search/actions/workflows/ci.yml)
+[![Versioning](https://img.shields.io/badge/versioning-Changesets-7C3AED?style=for-the-badge)](https://github.com/changesets/changesets)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-`pi-search` is a standalone [pi](https://pi.dev) extension that bundles the search and research tools you reach for most often into one package.
+Five research tools for the Pi coding agent: `websearch`, `codesearch`, `context7`, `deepwiki`, `web_fetch`.
 
-It combines:
-- real-time **web search** via Exa AI
-- **technical docs and API search** via Exa AI web search
-- **official documentation lookup** via Context7
-- **public repository documentation and Q&A** via DeepWiki
-- **structured source citations** on Exa-backed retrieval tools
-
-The goal is simple: install one extension and get a practical research toolkit for current docs, code examples, library references, and repository architecture.
-
-## Tools
-
-| Tool | Source | Description |
-|------|--------|-------------|
-| **`websearch`** | [Exa AI](https://exa.ai) | Real-time web search. No API key required. |
-| **`codesearch`** | [Exa AI](https://exa.ai) | Technical doc/example search tuned for programming queries and powered by Exa web search. No API key required. |
-| **`context7`** | [Context7](https://context7.com) | Resolve library IDs and fetch library documentation. Optional `CONTEXT7_API_KEY` for higher rate limits. |
-| **`deepwiki`** | [DeepWiki](https://docs.devin.ai/work-with-devin/deepwiki-mcp) | Read generated docs and ask repo-grounded questions for public GitHub repositories. No API key required. |
-| **`web_fetch`** | [Exa AI](https://exa.ai) | Fetch a webpage's full content as clean markdown. Use after `websearch`/`codesearch` to read a specific result. |
+- **Zero-config by default** — works with no API key via the Exa MCP server
+- **Full feature access when configured** — set `EXA_API_KEY` to unlock `searchType: deep`, `recencyFilter`, `domainFilter`, `highlights` etc. via direct REST
+- **Disable any tool** you don't need via `disabledTools` config
+- **Coded errors** for reliable model reasoning on failure
+- **Streaming progress** for multi-query research
 
 ## Install
 
@@ -29,70 +19,84 @@ The goal is simple: install one extension and get a practical research toolkit f
 pi install npm:@heyhuynhgiabuu/pi-search
 ```
 
-Or load locally during development:
+That's it. No API key required.
 
-```bash
-pi -e ./src/index.ts
-```
+## Tools
 
-Optional for higher Context7 rate limits:
-
-```bash
-export CONTEXT7_API_KEY=your_key_here
-```
+| Tool | Purpose | When to use |
+| --- | --- | --- |
+| `websearch` | Search the open web | Default research tool. `recencyFilter: "day"` for sitreps. `domainFilter: ["reuters.com", "-reddit.com"]` to shape source set. `searchType: "deep"` for thorough coverage. |
+| `codesearch` | Code/library search | Looking for API references, library patterns, implementation examples. |
+| `context7` | Up-to-date library docs | Fetch current documentation for a library: `libraryName: "react"`, `topic: "hooks"`. |
+| `deepwiki` | Ask about a public GitHub repo | `repo: "facebook/react"`, `question: "How does the reconciler work?"`. |
+| `web_fetch` | Extract full text from a URL | Follow-up after `websearch` to read the best articles. |
 
 ## Configuration
 
-Create `~/.pi/agent/pi-search.json` to customize the extension.
-
-### Disable specific tools
+Optional. Create `~/.pi/pi-search.json`:
 
 ```json
 {
-  "disabledTools": ["context7", "codesearch"]
+  "exaApiKey": "your-exa-api-key",
+  "disabledTools": ["codesearch"],
+  "mcpTimeoutMs": 30000
 }
 ```
 
-Valid tool names: `websearch`, `codesearch`, `context7`, `deepwiki`, `web_fetch`.
+Or set environment variables:
 
-If the file doesn't exist or is invalid JSON, all tools are enabled by default.
-
-## Usage
-
-```ts
-websearch({ query: "Next.js 15 server actions" })
-codesearch({ query: "Go context.WithCancel usage" })
-context7({ operation: "resolve", libraryName: "react" })
-context7({ operation: "query", libraryId: "/reactjs/react.dev", topic: "hooks" })
-deepwiki({ operation: "ask", repo: "facebook/react", question: "How does reconciliation work?" })
+```bash
+export EXA_API_KEY=your-key
+export PI_SEARCH_DISABLED_TOOLS=codesearch,deepwiki
+export PI_SEARCH_USE_REST=true        # force direct REST (default: false; auto-enabled when EXA_API_KEY is set)
+export PI_SEARCH_CONFIG_PATH=/path/to/config.json
 ```
 
-## When to use which tool
+Resolution order (highest priority first):
+1. environment variables
+2. `~/.pi/pi-search.json` (or `PI_SEARCH_CONFIG_PATH`)
+3. defaults
 
-- `websearch` → current information, blog posts, docs, release notes, discussions
-- `codesearch` → programming docs, API examples, framework usage, and technical references
-- `context7` → official library documentation after resolving the right library ID
-- `deepwiki` → generated documentation and Q&A for public GitHub repositories
+## Direct REST vs MCP
 
-## DeepWiki limitations
+`websearch` and `codesearch` choose their provider at execution time:
 
-`deepwiki` uses Devin's public, no-auth DeepWiki MCP endpoint. It only supports public GitHub repositories. Treat results as generated documentation that can be incomplete or stale; use the repository source for exact code truth.
+- If `EXA_API_KEY` is set (or `PI_SEARCH_USE_REST=true`), they call `https://api.exa.ai/search` directly. This unlocks the full Exa feature surface.
+- Otherwise they fall back to `https://mcp.exa.ai/mcp` (the public MCP server, no key required). Feature set is narrower.
 
-## Citations
+`context7`, `deepwiki`, and `web_fetch` always use their respective providers regardless.
 
-`websearch`, `codesearch`, and `web_fetch` return source metadata in `details.citations` when source URLs are available. Their text output also includes a `## Sources` section with numbered source markers so the model can see the same source IDs that are exposed as structured metadata.
+## Architecture
 
-Important limitation: these citations are attached to individual tool results. They do **not** prove which sources a final assistant response used unless the Pi host/runtime links assistant messages to tool calls and tool result details.
+```
+src/
+├── index.ts          # extension entrypoint, wires the 5 tools
+├── config.ts         # env + ~/.pi/pi-search.json resolution
+├── errors.ts         # coded errors (validation_error, mcp_error, …)
+├── types.ts          # shared types
+├── mcp/client.ts     # JSON-RPC 2.0 MCP client
+├── exa/client.ts     # direct REST client for api.exa.ai
+├── exa/params.ts     # parameter normalization
+└── tools/            # one file per tool + shared citations.ts
+```
+
+See `AGENTS.md` for the change map.
 
 ## Development
 
 ```bash
-npm install
-npm run typecheck
-npm run lint
-npm test
+make install        # npm ci
+make check          # biome + tsc + vitest --coverage
+make test           # vitest
+make build          # tsc → dist/
+make format         # biome format --write .
+make lint           # biome lint
+make typecheck      # tsc --noEmit
+make release-dry-run
+make version-packages
+make release
 ```
 
 ## License
 
-MIT — [huynhgiabuu](https://github.com/buddingnewinsights)
+MIT

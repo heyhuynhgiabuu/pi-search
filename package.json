@@ -1,57 +1,67 @@
 {
 	"name": "@heyhuynhgiabuu/pi-search",
 	"version": "0.2.3",
-	"description": "Unified search toolkit for pi — web search, code search, docs lookup, and repo documentation in one extension.",
-	"author": "huynhgiabuu",
+	"description": "Research tools for the Pi coding agent: websearch, codesearch, context7, deepwiki, web_fetch.",
+	"type": "module",
 	"license": "MIT",
+	"keywords": [
+		"pi",
+		"pi-package",
+		"pi-coding-agent",
+		"extension",
+		"exa",
+		"web-search",
+		"research"
+	],
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/buddingnewinsights/pi-search.git"
+		"url": "git+https://github.com/heyhuynhgiabuu/pi-search.git"
 	},
-	"homepage": "https://github.com/buddingnewinsights/pi-search#readme",
 	"bugs": {
-		"url": "https://github.com/buddingnewinsights/pi-search/issues"
+		"url": "https://github.com/heyhuynhgiabuu/pi-search/issues"
+	},
+	"homepage": "https://github.com/heyhuynhgiabuu/pi-search#readme",
+	"files": [
+		"dist",
+		"README.md",
+		"CHANGELOG.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"format": "biome format --write .",
+		"lint": "biome lint .",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest --run --coverage",
+		"test:watch": "vitest",
+		"check": "biome check . && npm run typecheck && npm run test",
+		"build": "tsc",
+		"prepublishOnly": "npm run check && npm run build",
+		"release:dry-run": "npm publish --dry-run",
+		"changeset": "changeset",
+		"version-packages": "changeset version",
+		"release": "changeset publish"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.5",
+		"@changesets/cli": "^2.30.0",
+		"@types/node": "^24.0.0",
+		"@vitest/coverage-v8": "^3.2.4",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "",
+		"@sinclair/typebox": "*"
+	},
+	"engines": {
+		"node": ">=20.0.0"
 	},
 	"publishConfig": {
 		"access": "public"
 	},
-	"keywords": [
-		"pi-package",
-		"pi",
-		"pi-extension",
-		"search",
-		"web-search",
-		"code-search",
-		"documentation",
-		"context7",
-		"deepwiki",
-		"exa",
-		"websearch",
-		"codesearch"
-	],
-	"peerDependencies": {
-		"@mariozechner/pi-coding-agent": "*"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^2.3.5",
-		"@types/node": "^20.0.0",
-		"typescript": "^5.0.0",
-		"vitest": "^4.0.18"
-	},
-	"dependencies": {
-		"@sinclair/typebox": "^0.34.0"
-	},
-	"scripts": {
-		"build": "tsc",
-		"typecheck": "tsc --noEmit",
-		"lint": "biome check src/ tests/",
-		"lint:fix": "biome check --fix src/ tests/",
-		"test": "vitest run --passWithNoTests",
-		"test:watch": "vitest --passWithNoTests"
-	},
 	"pi": {
 		"extensions": [
-			"./src/index.ts"
+			"./dist/index.js"
 		]
 	}
 }

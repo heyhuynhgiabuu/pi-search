@@ -18,5 +18,17 @@
 		"enabled": true,
 		"indentStyle": "tab",
 		"lineWidth": 120
+	},
+	"files": {
+		"includes": [
+			"src/**/*.ts",
+			"tests/**/*.ts",
+			"*.json",
+			"*.md",
+			"vitest.config.ts",
+			"!dist",
+			"!node_modules",
+			"!coverage"
+		]
 	}
 }

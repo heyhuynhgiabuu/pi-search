@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4
+
+### Patch Changes
+
+- a729bb9: Architecture hardening: split the monolithic `src/index.ts` into focused modules (`config`, `errors`, `types`, `mcp/client`, `exa/client`, `exa/params`, `tools/*`), adopt coded errors (`validation_error`, `config_error`, `provider_error`, `mcp_error`, `mcp_timeout`, `mcp_unavailable`, `fetch_error`, etc.), add streaming progress via `onUpdate` for multi-step tools, and add per-tool DI tests with coverage thresholds.
+
+  `websearch` and `codesearch` now use direct REST `https://api.exa.ai/search` when `EXA_API_KEY` is set, unlocking the full Exa capability surface (`searchType: auto|neural|instant|deep|deep-reasoning|deep-max`, `recencyFilter: day|week|month|year`, `startPublishedDate`/`endPublishedDate`, `includeDomains`/`excludeDomains`/`domainFilter` with `-` prefix, configurable `highlightsMaxCharacters`). MCP path is kept as a zero-config fallback.
+
+  DX: added `Makefile` (mirrors npm scripts), `AGENTS.md` change map, GitHub Actions CI (biome + tsc + vitest with coverage), and Changesets for versioned changelog.
+
+  Public API is unchanged — same five tools (`websearch`, `codesearch`, `context7`, `deepwiki`, `web_fetch`), same env/file resolution, same `disabledTools` config key. Bumping patch because no user-facing behavior changed.
+
 ## [0.2.3] - 2026-06-16
 
 ### Removed

@@ -1,122 +1,72 @@
-/**
- * web_fetch tool — fetches a URL and returns the page content as clean text.
- *
- * No API key required. Uses Node's global fetch. Designed as the
- * deep-extraction follow-up to websearch and codesearch.
- */
-
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { resolveConfig } from "../config.js";
-import { buildErrorResult, FetchError, toPiSearchError, ValidationError } from "../errors.js";
-import { dedupeCitations, extractCitationsFromMcpText, formatCitationFooter } from "./citations.js";
-import { renderWebFetchResult } from "./render.js";
+import { buildErrorResult, toPiSearchError } from "../errors.js";
+import { FETCH_CONTENT_CUSTOM_TYPE, putFetchContent, WEB_FETCH_INLINE_MAX_CHARS } from "../fetch/content-store.js";
+import { resolveUrlContent } from "../fetch/resolve-content.js";
+import type { ResolvedConfig } from "../types.js";
 
-const MAX_FETCH_BYTES = 5 * 1024 * 1024; // 5MB
-const DEFAULT_MAX_CHARS = 50_000;
+const DEFAULT_MAX_OUTPUT_CHARS = 50_000;
+const MAX_OUTPUT_CHARS_LIMIT = 200_000;
 
-export function createWebFetchTool(_pi: ExtensionAPI) {
+export function createWebFetchTool(pi: ExtensionAPI, config: ResolvedConfig): ToolDefinition {
 	return {
 		name: "web_fetch",
 		label: "Web Fetch",
 		description:
-			"Fetch a URL and return the page content as clean text/markdown. Use this after websearch to extract full articles. For PDFs or binary content, use a more specialized tool. Set maxOutputChars to control truncation.",
+			"Fetch a URL and return readable content (Readability/turndown for HTML; Jina Reader fallback on thin/consent pages; GitHub URLs via API). Large pages store full text — use fetchId with get_fetch_content. Survives Pi session resume via session JSONL. For local video/PDF use pi-web-access fetch_content.",
 		parameters: Type.Object({
 			url: Type.String({ description: "The URL to fetch (must be http:// or https://)." }),
 			maxOutputChars: Type.Optional(
-				Type.Integer({ description: "Maximum characters to return (default 50000).", minimum: 1000, maximum: 200000 }),
+				Type.Number({
+					description: `Maximum characters to return inline (default ${DEFAULT_MAX_OUTPUT_CHARS}). Full body may still be stored for get_fetch_content.`,
+					minimum: 1000,
+					maximum: MAX_OUTPUT_CHARS_LIMIT,
+				}),
 			),
 		}),
-		async execute(
-			_id: string,
-			params: Record<string, unknown>,
-			signal: AbortSignal | undefined,
-			onUpdate:
-				| ((update: { content: Array<{ type: "text"; text: string }>; details?: Record<string, unknown> }) => void)
-				| undefined,
-		) {
+		async execute(_toolCallId, params: Record<string, unknown>, signal) {
 			try {
-				const config = resolveConfig();
-				if (config.disabledTools.has("web_fetch")) {
-					throw new ValidationError("web_fetch is disabled in config.");
-				}
+				const url = typeof params.url === "string" ? params.url : "";
+				const maxOutputChars =
+					typeof params.maxOutputChars === "number" ? params.maxOutputChars : DEFAULT_MAX_OUTPUT_CHARS;
+				const resolved = await resolveUrlContent(url, config, { signal, maxOutputChars: MAX_OUTPUT_CHARS_LIMIT });
 
-				const url = (params.url as string | undefined)?.trim();
-				const maxOutputChars = (params.maxOutputChars as number | undefined) ?? DEFAULT_MAX_CHARS;
-
-				if (!url) throw new ValidationError("url is required.");
-				if (!/^https?:\/\//i.test(url))
-					throw new ValidationError(`url must start with http:// or https://. Got: ${url}`);
-
-				onUpdate?.({
-					content: [{ type: "text", text: `Fetching ${url}…` }],
-					details: { phase: "fetching", url },
+				const { id: fetchId, record } = putFetchContent({
+					url: resolved.url,
+					title: resolved.title,
+					text: resolved.text,
+					extraction: resolved.extraction,
 				});
+				pi.appendEntry(FETCH_CONTENT_CUSTOM_TYPE, record);
 
-				const response = await fetch(url, {
-					signal,
-					headers: { "User-Agent": "pi-search/1.0 (+https://github.com/heyhuynhgiabuu/pi-search)" },
-					redirect: "follow",
-				});
+				const inlineLimit = Math.min(maxOutputChars, WEB_FETCH_INLINE_MAX_CHARS);
+				const inlineBody =
+					resolved.text.length > inlineLimit
+						? `${resolved.text.slice(0, inlineLimit)}\n\n[truncated — full ${resolved.text.length} chars stored; use get_fetch_content with fetchId ${fetchId}]`
+						: resolved.text;
 
-				if (!response.ok) {
-					throw new FetchError("fetch_error", `HTTP ${response.status} ${response.statusText} for ${url}`);
-				}
+				const header = resolved.title ? `# ${resolved.title}\n\n` : "";
+				const output = `${header}${inlineBody}`;
 
-				const contentType = response.headers.get("content-type") ?? "";
-				let body = await response.text();
-
-				if (body.length > MAX_FETCH_BYTES) {
-					body = `${body.slice(0, MAX_FETCH_BYTES)}\n\n[truncated to ${MAX_FETCH_BYTES} bytes]`;
-				}
-
-				// Strip HTML if we got a non-text content-type
-				if (contentType.includes("text/html")) {
-					body = stripHtml(body);
-				}
-
-				if (body.length > maxOutputChars) {
-					body = `${body.slice(0, maxOutputChars)}\n\n[truncated to ${maxOutputChars} chars]`;
-				}
-
-				const citations = dedupeCitations(extractCitationsFromMcpText(body, "web"));
-				const footer = formatCitationFooter(citations);
+				const truncatedInline = resolved.text.length > inlineLimit;
 
 				return {
-					content: [{ type: "text", text: `${body}${footer}` }],
+					content: [{ type: "text", text: output }],
 					details: {
-						provider: "web-fetch",
-						url,
-						contentType,
-						originalLength: body.length,
-						citationCount: citations.length,
+						url: resolved.url,
+						title: resolved.title,
+						contentType: resolved.contentType,
+						status: resolved.status,
+						extraction: resolved.extraction,
+						truncated: truncatedInline || resolved.truncated,
+						charCount: resolved.text.length,
+						fetchId,
+						storedChars: resolved.text.length,
 					},
 				};
 			} catch (error) {
 				return buildErrorResult(toPiSearchError(error));
 			}
 		},
-		renderResult: renderWebFetchResult,
 	};
-}
-
-function stripHtml(html: string): string {
-	// Remove script/style blocks
-	let text = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
-	text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "");
-	// Strip tags but keep line breaks for block elements
-	text = text.replace(/<\/(p|div|li|h[1-6]|br|tr)>/gi, "\n");
-	text = text.replace(/<br\s*\/?>/gi, "\n");
-	text = text.replace(/<[^>]+>/g, "");
-	// Decode common entities
-	text = text
-		.replace(/&nbsp;/g, " ")
-		.replace(/&amp;/g, "&")
-		.replace(/&lt;/g, "<")
-		.replace(/&gt;/g, ">")
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'");
-	// Collapse whitespace
-	text = text.replace(/\n{3,}/g, "\n\n");
-	return text.trim();
 }

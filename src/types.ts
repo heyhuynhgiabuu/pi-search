@@ -78,6 +78,7 @@ export type EffectiveExaParams = {
 	startPublishedDate?: string;
 	endPublishedDate?: string;
 	highlightsMaxCharacters: number;
+	includeContent?: boolean;
 };
 
 /** A normalized search result shared across websearch/codesearch. */
@@ -121,7 +122,14 @@ export type Citation = {
 /** Effective config resolved at extension load time. */
 export type ResolvedConfig = {
 	exaApiKey?: string;
+	braveApiKey?: string;
 	disabledTools: Set<string>;
 	useRestForExa: boolean;
 	mcpTimeoutMs: number;
+	ssrf: {
+		/** IPv4 CIDR ranges exempt from SSRF blocks (e.g. TUN fake-IP pools). */
+		allowRanges: string[];
+	};
+	githubToken?: string;
+	urlRewrites: import("./fetch/url-rewrites.js").UrlRewriteRule[];
 };

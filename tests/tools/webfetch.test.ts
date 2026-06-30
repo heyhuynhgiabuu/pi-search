@@ -1,52 +1,53 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createWebFetchTool } from "../../src/tools/webfetch.js";
+import type { ResolvedConfig } from "../../src/types.js";
 
-const originalFetch = globalThis.fetch;
-const originalEnv = { ...process.env };
+const baseConfig: ResolvedConfig = {
+	disabledTools: new Set(),
+	useRestForExa: true,
+	mcpTimeoutMs: 5000,
+	ssrf: { allowRanges: [] },
+	urlRewrites: [],
+};
 
 describe("web_fetch tool", () => {
-	beforeEach(() => {
-		for (const key of Object.keys(process.env)) delete process.env[key];
-	});
-	afterEach(() => {
-		globalThis.fetch = originalFetch;
-		for (const key of Object.keys(process.env)) delete process.env[key];
-		Object.assign(process.env, originalEnv);
-	});
-
-	it("has the expected schema and label", () => {
-		const tool = createWebFetchTool({} as never);
+	it("has correct name and parameters", () => {
+		const appendEntry = vi.fn();
+		const tool = createWebFetchTool({ appendEntry } as never, baseConfig);
 		expect(tool.name).toBe("web_fetch");
-		expect(tool.label).toBe("Web Fetch");
+		expect(tool.parameters).toBeDefined();
 	});
 
-	it("rejects non-http URLs with validation_error", async () => {
-		const tool = createWebFetchTool({} as never);
-		const result = await tool.execute("id", { url: "ftp://example.com" }, undefined, undefined);
-		expect((result.details as { error: { code: string } }).error.code).toBe("validation_error");
+	it("returns fetch_blocked for localhost", async () => {
+		const tool = createWebFetchTool({ appendEntry: vi.fn() } as never, baseConfig);
+		const result = await tool.execute("id", { url: "http://127.0.0.1/secret" }, undefined);
+		const err = result.details?.error as { message?: string; code?: string } | undefined;
+		expect(err?.code).toBe("fetch_blocked");
+		expect(err?.message).toMatch(/SSRF/i);
 	});
 
-	it("strips HTML and returns clean text", async () => {
-		globalThis.fetch = vi
-			.fn()
-			.mockResolvedValue(
-				new Response(
-					`<html><head><title>X</title></head><body><h1>Hello</h1><script>bad()</script><p>World</p></body></html>`,
-					{ status: 200, headers: { "content-type": "text/html" } },
-				),
-			) as unknown as typeof fetch;
+	it("fetches HTML via mocked resolve pipeline", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => ({
+				ok: true,
+				status: 200,
+				headers: { get: () => "text/html" },
+				text: async () => `<html><head><title>Hi</title></head><body><p>${"content ".repeat(80)}</p></body></html>`,
+			})),
+		);
 
-		const tool = createWebFetchTool({} as never);
-		const result = await tool.execute("id", { url: "https://example.com" }, undefined, undefined);
-		expect(result.content[0].text).toContain("Hello");
-		expect(result.content[0].text).toContain("World");
-		expect(result.content[0].text).not.toContain("bad()");
-	});
+		const appendEntry = vi.fn();
+		const tool = createWebFetchTool({ appendEntry } as never, baseConfig);
+		const result = await tool.execute("id", { url: "https://example.com/page" }, undefined);
+		expect(appendEntry).toHaveBeenCalledWith(
+			"pi-search-fetch-content",
+			expect.objectContaining({ url: "https://example.com/page" }),
+		);
+		expect(result.content[0]?.text).toMatch(/content/);
+		expect(result.details?.extraction).toBeDefined();
+		expect(result.details?.fetchId).toBeDefined();
 
-	it("returns fetch_error code on HTTP error", async () => {
-		globalThis.fetch = vi.fn().mockResolvedValue(new Response("not found", { status: 404 })) as unknown as typeof fetch;
-		const tool = createWebFetchTool({} as never);
-		const result = await tool.execute("id", { url: "https://example.com/missing" }, undefined, undefined);
-		expect((result.details as { error: { code: string } }).error.code).toBe("fetch_error");
+		vi.unstubAllGlobals();
 	});
 });

@@ -1,7 +1,7 @@
 {
 	"name": "@heyhuynhgiabuu/pi-search",
 	"version": "0.2.4",
-	"description": "Research tools for the Pi coding agent: websearch, codesearch, context7, deepwiki, web_fetch.",
+	"description": "Research tools for the Pi coding agent: websearch, codesearch, context7, deepwiki, web_fetch, get_fetch_content.",
 	"type": "module",
 	"license": "MIT",
 	"keywords": [
@@ -45,6 +45,7 @@
 		"@biomejs/biome": "^2.3.5",
 		"@changesets/cli": "^2.30.0",
 		"@types/node": "^24.0.0",
+		"@types/turndown": "^5.0.6",
 		"@vitest/coverage-v8": "^3.2.4",
 		"typescript": "^5.9.2",
 		"vitest": "^3.2.4"
@@ -63,5 +64,11 @@
 		"extensions": [
 			"./dist/index.js"
 		]
+	},
+	"dependencies": {
+		"@mozilla/readability": "^0.6.0",
+		"linkedom": "^0.18.12",
+		"turndown": "^7.2.4",
+		"unpdf": "^1.6.2"
 	}
 }

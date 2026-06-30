@@ -37,6 +37,7 @@ export type RawExaParams = {
 	includeDomains?: string[];
 	excludeDomains?: string[];
 	highlightsMaxCharacters?: number;
+	includeContent?: boolean;
 };
 
 function unique<T>(values: T[]): T[] {
@@ -183,5 +184,6 @@ export function normalizeExaParams(raw: RawExaParams, options: { now?: () => Dat
 		...(startPublishedDate ? { startPublishedDate } : {}),
 		...(endPublishedDate ? { endPublishedDate } : {}),
 		highlightsMaxCharacters,
+		includeContent: raw.includeContent === true,
 	};
 }

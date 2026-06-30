@@ -76,10 +76,14 @@ When changing behavior, touch the narrowest file responsible for it:
 | `codesearch` schema/exec | `src/tools/codesearch.ts` + `tests/tools/codesearch.test.ts` |
 | `context7` schema/exec | `src/tools/context7.ts` + `tests/tools/context7.test.ts` |
 | `deepwiki` schema/exec | `src/tools/deepwiki.ts` + `tests/tools/deepwiki.test.ts` |
-| `web_fetch` schema/exec | `src/tools/webfetch.ts` + `tests/tools/webfetch.test.ts` |
+| `web_fetch` schema/exec | `src/tools/webfetch.ts` + `src/fetch/*` + `tests/tools/webfetch.test.ts` + `tests/fetch/*.test.ts` |
 | Config / API key lookup | `src/config.ts` + `tests/config.test.ts` |
 | Coded errors | `src/errors.ts` + `tests/errors.test.ts` |
 | Extension wiring | `src/index.ts` |
+| `get_fetch_content` | `src/tools/get-fetch-content.ts` + `src/fetch/content-store.ts` |
+| Brave failover / search orchestration | `src/search/run-websearch.ts` + `src/search/brave.ts` |
+| Exa MCP prose parser | `src/exa/mcp-blocks.ts` |
+| llms.txt / URL rewrites / GitHub auth | `src/fetch/llms-txt.ts`, `url-rewrites.ts`, `src/github/token.ts` |
 | Release ergonomics | `Makefile`, `.github/workflows/`, `README.md` |
 
 ## Project conventions

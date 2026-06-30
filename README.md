@@ -5,7 +5,7 @@
 [![Versioning](https://img.shields.io/badge/versioning-Changesets-7C3AED?style=for-the-badge)](https://github.com/changesets/changesets)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-Five research tools for the Pi coding agent: `websearch`, `codesearch`, `context7`, `deepwiki`, `web_fetch`.
+Six research tools for the Pi coding agent: `websearch`, `codesearch`, `context7`, `deepwiki`, `web_fetch`, `get_fetch_content`.
 
 - **Zero-config by default** — works with no API key via the Exa MCP server
 - **Full feature access when configured** — set `EXA_API_KEY` to unlock `searchType: deep`, `recencyFilter`, `domainFilter`, `highlights` etc. via direct REST
@@ -21,15 +21,18 @@ pi install npm:@heyhuynhgiabuu/pi-search
 
 That's it. No API key required.
 
+If you also use [pi-web-access](https://github.com/nicobailon/pi-web-access), see [Coexistence with pi-web-access](#coexistence-with-pi-web-access) below.
+
 ## Tools
 
 | Tool | Purpose | When to use |
 | --- | --- | --- |
-| `websearch` | Search the open web | Default research tool. `recencyFilter: "day"` for sitreps. `domainFilter: ["reuters.com", "-reddit.com"]` to shape source set. `searchType: "deep"` for thorough coverage. |
+| `websearch` | Search the open web | Exa discovery; `includeContent: true` fetches up to 5 result URLs for `get_fetch_content`. |
 | `codesearch` | Code/library search | Looking for API references, library patterns, implementation examples. |
 | `context7` | Up-to-date library docs | Fetch current documentation for a library: `libraryName: "react"`, `topic: "hooks"`. |
 | `deepwiki` | Ask about a public GitHub repo | `repo: "facebook/react"`, `question: "How does the reconciler work?"`. |
-| `web_fetch` | Extract full text from a URL | Follow-up after `websearch` to read the best articles. |
+| `web_fetch` | Extract readable content from a URL | HTML, **PDF text** (no OCR), GitHub API; disk cache `~/.pi/pi-search-fetch-cache/` (7d). |
+| `get_fetch_content` | Read stored fetch body | `fetchId` or `list: true`. Session JSONL (1h) + disk cache (7d). |
 
 ## Configuration
 
@@ -38,15 +41,22 @@ Optional. Create `~/.pi/pi-search.json`:
 ```json
 {
   "exaApiKey": "your-exa-api-key",
+  "braveApiKey": "your-brave-api-key",
   "disabledTools": ["codesearch"],
-  "mcpTimeoutMs": 30000
+  "mcpTimeoutMs": 30000,
+  "ssrf": {
+    "allowRanges": ["198.18.0.0/15"]
+  }
 }
 ```
+
+`ssrf.allowRanges` exempts IPv4 CIDRs from the `web_fetch` SSRF guard (e.g. TUN fake-IP VPNs). `0.0.0.0/0` is rejected.
 
 Or set environment variables:
 
 ```bash
 export EXA_API_KEY=your-key
+export BRAVE_API_KEY=your-brave-key   # optional; failover (free key: https://brave.com/search/api/)
 export PI_SEARCH_DISABLED_TOOLS=codesearch,deepwiki
 export PI_SEARCH_USE_REST=true        # force direct REST (default: false; auto-enabled when EXA_API_KEY is set)
 export PI_SEARCH_CONFIG_PATH=/path/to/config.json
@@ -77,10 +87,35 @@ src/
 ├── mcp/client.ts     # JSON-RPC 2.0 MCP client
 ├── exa/client.ts     # direct REST client for api.exa.ai
 ├── exa/params.ts     # parameter normalization
+├── fetch/            # web_fetch pipeline (html, github, jina, ssrf)
 └── tools/            # one file per tool + shared citations.ts
 ```
 
 See `AGENTS.md` for the change map.
+
+## Roadmap
+
+Planned work (fetch fallbacks, GitHub URL routing, SSRF/proxy options, large-content retrieval) is in [`docs/ROADMAP.md`](docs/ROADMAP.md). Rationale and rejected alternatives are in [`.pi/artifacts/DECISIONS.md`](.pi/artifacts/DECISIONS.md).
+
+## Agent workflow (Pi)
+
+- **Discover:** `websearch` (Exa deep modes) → `web_fetch` or `includeContent: true` on search → `get_fetch_content` with `fetchId` or `list: true`.
+- **Libraries / repos:** `context7`, `codesearch`, `deepwiki`; GitHub URLs in `web_fetch` use the API (`GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token`).
+- **Doc site roots:** `web_fetch` on `https://example.com/` may load `/llms.txt` when present.
+- **Brave:** Used only when Exa fails if `BRAVE_API_KEY` / `braveApiKey` is set (also reads `~/.config/ketch/config.json` → `brave_api_key` if unset).
+
+Optional config: `urlRewrites` (`[{ "match": "...", "replace": "..." }]`), `githubToken`, `ssrf.allowRanges`.
+
+## Coexistence with pi-web-access
+
+[pi-web-access](https://github.com/nicobailon/pi-web-access) covers general web search (`web_search`), rich fetch (GitHub clone, video, PDF, anti-bot fallbacks), and optional search curation. pi-search focuses on **Exa deep discovery**, **codesearch**, **context7**, **deepwiki**, and a minimal **web_fetch**.
+
+If you use both, disable overlapping tools to avoid duplicate calls and confused tool choice:
+
+- Prefer pi-search for `websearch`, `codesearch`, `context7`, `deepwiki`.
+- Prefer pi-web-access for heavy fetch and multimedia; set `"webSearch": { "enabled": false }` in `~/.pi/web-search.json` if you only want its fetch tools, **or** add `websearch` / `web_fetch` to pi-search `disabledTools`.
+
+Details: coexistence table in [`docs/ROADMAP.md`](docs/ROADMAP.md#coexistence-with-pi-web-access).
 
 ## Development
 

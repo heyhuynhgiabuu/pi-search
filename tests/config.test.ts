@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -81,6 +81,17 @@ describe("config", () => {
 			process.env.PI_SEARCH_USE_REST = "TRUE";
 			const config = resolveConfig({ env: process.env, homeDir: tempDir });
 			expect(config.useRestForExa).toBe(true);
+		});
+
+		it("parses ssrf.allowRanges from config file", () => {
+			const piDir = join(tempDir, ".pi");
+			mkdirSync(piDir, { recursive: true });
+			writeFileSync(
+				join(piDir, "pi-search.json"),
+				JSON.stringify({ ssrf: { allowRanges: ["198.18.0.0/15", "0.0.0.0/0"] } }),
+			);
+			const config = resolveConfig({ env: process.env, homeDir: tempDir });
+			expect(config.ssrf.allowRanges).toEqual(["198.18.0.0/15"]);
 		});
 	});
 

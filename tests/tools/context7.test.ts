@@ -34,13 +34,7 @@ describe("context7 tool", () => {
 				new Response(JSON.stringify({ results: [{ id: "/reactjs/react.dev", title: "React" }] }), { status: 200 }),
 			)
 			.mockResolvedValueOnce(
-				new Response(
-					JSON.stringify({
-						content: "# Hooks\nuseState...",
-						metadata: { title: "React Hooks", url: "https://react.dev" },
-					}),
-					{ status: 200 },
-				),
+				new Response("### Hooks\nuseState...", { status: 200, headers: { "content-type": "text/plain" } }),
 			);
 		globalThis.fetch = mockFetch as unknown as typeof fetch;
 

@@ -61,7 +61,7 @@ describe("render", () => {
 			const text = "x".repeat(COLLAPSED_PREVIEW_CHARS + 100);
 			const r = paginateText(text, false);
 			expect(r.page.length).toBeLessThan(text.length);
-			expect(r.page).toContain("Ctrl+O");
+			expect(r.page).toContain("ctrl+o");
 		});
 
 		it("adds page footer when expanded and long", () => {

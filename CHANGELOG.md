@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.2.6 (unreleased — verify in Pi 0.80 before tag)
+## 0.2.6 - 2026-07-01
+
+### Fixed
+
+- **context7:** Docs URL uses `type=txt`; responses are Markdown/plain text. `fetchDocs()`
+  reads text and JSON-parses only when appropriate (fixes `Unexpected token '#'` on `###` headings).
+- **Tool result TUI:** Markdown ANSI resets no longer clear `toolSuccessBg` mid-line
+  (`preserveBoxBackground` in `render.ts`).
 
 ### Changed
 
@@ -8,10 +15,9 @@
   `@earendil-works/pi-coding-agent` / `@earendil-works/pi-tui` ^0.80.0.
 - All extension imports updated from `@mariozechner/*` to `@earendil-works/*`.
 - Dev/CI tests now resolve against the same host stack as Pi 0.80.x.
-- **Tool result TUI:** `websearch`, `web_fetch`, `context7`, and `deepwiki`
-  `renderResult` now wraps Markdown in a `Box` with `setBgFn(theme.bg("toolSuccessBg"))`
-  so the panel background fills full terminal width (pi-tui `Box` pads short lines).
-  ANSI resets from Markdown are rewritten to preserve the background across colored spans.
+- **Tool result TUI:** `websearch`, `web_fetch`, `context7`, and `deepwiki` wrap Markdown in a
+  `Box` with `setBgFn(theme.bg("toolSuccessBg"))` for full terminal-width panel background.
+- Collapsed preview hint: `ctrl+o to expand` (lowercase).
 
 ## 0.2.5
 

@@ -8,7 +8,7 @@ const ANSI_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([0-9;]*)m`, "g");
 const RESET_WITHOUT_BG = "\x1b[22;23;24;25;27;28;29;39m";
 
 /** Collapsed preview length (chars). */
-export const COLLAPSED_PREVIEW_CHARS = 200;
+export const COLLAPSED_PREVIEW_CHARS = 1_500;
 
 /** Default page size for expanded results (chars). */
 export const DEFAULT_PAGE_CHARS = 4000;
@@ -68,7 +68,7 @@ export function paginateText(text: string, expanded: boolean, pageChars = DEFAUL
 
 	if (!expanded) {
 		const preview =
-			text.length > COLLAPSED_PREVIEW_CHARS ? `${text.slice(0, COLLAPSED_PREVIEW_CHARS)}… (Ctrl+O to expand)` : text;
+			text.length > COLLAPSED_PREVIEW_CHARS ? `${text.slice(0, COLLAPSED_PREVIEW_CHARS)}… (ctrl+o to expand)` : text;
 		return { page: preview, totalChars, totalPages: 1 };
 	}
 

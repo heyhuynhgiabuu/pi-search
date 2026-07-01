@@ -131,7 +131,19 @@ async function fetchDocs(
 		}
 		throw new FetchError("fetch_error", `Context7 docs returned ${response.status}`);
 	}
-	return (await response.json()) as Context7DocsResponse;
+	const body = await response.text();
+	const contentType = response.headers.get("content-type") ?? "";
+	if (contentType.includes("application/json") || body.trimStart().startsWith("{")) {
+		try {
+			return JSON.parse(body) as Context7DocsResponse;
+		} catch {
+			// Context7's txt endpoint may omit/lie about content-type; fall through to text.
+		}
+	}
+	return {
+		content: body,
+		metadata: { title: libraryId, url: `https://context7.com${libraryId}` },
+	};
 }
 
 function renderOutput(libraryId: string, docs: Context7DocsResponse): string {

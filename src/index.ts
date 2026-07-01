@@ -16,7 +16,7 @@
  * Unknown tool names in disabledTools are rejected via ConfigError.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveConfig, validateDisabledTools } from "./config.js";
 import { type FetchSessionRestoreContext, restoreFetchContentFromSession } from "./fetch/content-store.js";
 import { createCodesearchTool } from "./tools/codesearch.js";

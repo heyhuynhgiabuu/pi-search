@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.6 (unreleased — verify in Pi 0.80 before tag)
+
+### Changed
+
+- **Pi 0.80 alignment:** peers and devDependencies use
+  `@earendil-works/pi-coding-agent` / `@earendil-works/pi-tui` ^0.80.0.
+- All extension imports updated from `@mariozechner/*` to `@earendil-works/*`.
+- Dev/CI tests now resolve against the same host stack as Pi 0.80.x.
+
 ## 0.2.5
 
 ### Minor Changes

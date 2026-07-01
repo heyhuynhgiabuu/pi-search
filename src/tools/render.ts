@@ -9,7 +9,7 @@
  *
  * Adapted from TUI work contributed via PR #1 by x4cc3 — the earendil
  * fork they used is not required; we use the mainline
- * `@mariozechner/pi-coding-agent` + `pi-tui` APIs and adapt between
+ * `@earendil-works/pi-coding-agent` + `pi-tui` APIs and adapt between
  * `Theme` (pi-coding-agent) and `MarkdownTheme` (pi-tui) via
  * `toMarkdownTheme()` below.
  *
@@ -18,8 +18,8 @@
  * disabled without changing the tool's behavior.
  */
 
-import type { Component } from "@mariozechner/pi-tui";
-import { Markdown, Text } from "@mariozechner/pi-tui";
+import type { Component } from "@earendil-works/pi-tui";
+import { Markdown, Text } from "@earendil-works/pi-tui";
 import { dedupeCitations, extractCitationsFromMcpText } from "./citations.js";
 
 // ---- Types ----------------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ResolvedConfig } from "../types.js";
 import { FETCH_CONTENT_CUSTOM_TYPE, putFetchContent } from "./content-store.js";
 import { writeFetchToDiskCache } from "./disk-cache.js";

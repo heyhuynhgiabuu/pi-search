@@ -8,7 +8,7 @@
  * No API key required.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { resolveConfig } from "../config.js";
 import { buildErrorResult, FetchError, toPiSearchError, ValidationError } from "../errors.js";

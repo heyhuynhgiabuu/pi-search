@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { buildErrorResult, toPiSearchError, ValidationError } from "../errors.js";
 import { getFetchContent, listFetchContent } from "../fetch/content-store.js";

@@ -73,13 +73,14 @@ describe("render", () => {
 	});
 
 	describe("renderWebsearchResult", () => {
-		it("renders a Markdown component for collapsed and expanded", () => {
+		it("renders a Box-wrapped Markdown for collapsed and expanded", () => {
 			const theme = makeTheme();
 			const result = baseResult("Title: Hello\nURL: https://example.com\nSnippet: world");
 			const collapsed = renderWebsearchResult(result, { expanded: false, isPartial: false }, theme, {});
 			const expanded = renderWebsearchResult(result, { expanded: true, isPartial: false }, theme, {});
 			expect(collapsed).not.toBeNull();
 			expect(expanded).not.toBeNull();
+			expect(collapsed?.constructor?.name).toBe("Box");
 		});
 
 		it("includes a Sources footer when expanded and citations are present", () => {

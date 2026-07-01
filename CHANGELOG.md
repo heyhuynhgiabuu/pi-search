@@ -8,6 +8,10 @@
   `@earendil-works/pi-coding-agent` / `@earendil-works/pi-tui` ^0.80.0.
 - All extension imports updated from `@mariozechner/*` to `@earendil-works/*`.
 - Dev/CI tests now resolve against the same host stack as Pi 0.80.x.
+- **Tool result TUI:** `websearch`, `web_fetch`, `context7`, and `deepwiki`
+  `renderResult` now wraps Markdown in a `Box` with `setBgFn(theme.bg("toolSuccessBg"))`
+  so the panel background fills full terminal width (pi-tui `Box` pads short lines).
+  ANSI resets from Markdown are rewritten to preserve the background across colored spans.
 
 ## 0.2.5
 

@@ -1,40 +1,27 @@
-/**
- * TUI rendering for the 5 pi-search tools.
- *
- * Each tool's `renderResult` produces a `Markdown` widget that:
- *  - shows a concise summary by default
- *  - expands to the full result on demand (user toggles Ctrl+O)
- *  - paginates long outputs into readable chunks
- *  - colors citations, headings, and metadata per the host's theme
- *
- * Adapted from TUI work contributed via PR #1 by x4cc3 — the earendil
- * fork they used is not required; we use the mainline
- * `@earendil-works/pi-coding-agent` + `pi-tui` APIs and adapt between
- * `Theme` (pi-coding-agent) and `MarkdownTheme` (pi-tui) via
- * `toMarkdownTheme()` below.
- *
- * Pure functions over `result.content[0].text`; the tool's own text
- * output is the source of truth so this renderer can be swapped or
- * disabled without changing the tool's behavior.
- */
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { Box, Markdown } from "@earendil-works/pi-tui";
 
-import type { Component } from "@earendil-works/pi-tui";
-import { Markdown, Text } from "@earendil-works/pi-tui";
-import { dedupeCitations, extractCitationsFromMcpText } from "./citations.js";
+/** Theme color for tool result panel background (matches pi-pretty `toolSuccess`). */
+const TOOL_RESULT_BG: Parameters<Theme["bg"]>[0] = "toolSuccessBg";
+const ESC_RE = "\u001b";
+const ANSI_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([0-9;]*)m`, "g");
+const RESET_WITHOUT_BG = "\x1b[22;23;24;25;27;28;29;39m";
 
-// ---- Types ----------------------------------------------------------------
+/** Collapsed preview length (chars). */
+export const COLLAPSED_PREVIEW_CHARS = 200;
 
-/** Subset of pi-coding-agent's Theme we use. */
-export type Theme = {
-	fg: (color: string, text: string) => string;
-	bg: (color: string, text: string) => string;
+/** Default page size for expanded results (chars). */
+export const DEFAULT_PAGE_CHARS = 4000;
+
+export type RenderOptions = {
+	expanded?: boolean;
+	isPartial?: boolean;
 };
 
-/** Subset of pi-tui's MarkdownTheme we adapt to. */
-type MarkdownTheme = {
+export type MarkdownTheme = {
 	heading: (text: string) => string;
 	link: (text: string) => string;
-	linkUrl: (text: string) => string;
+	linkUrl: (url: string) => string;
 	code: (text: string) => string;
 	codeBlock: (text: string) => string;
 	codeBlockBorder: (text: string) => string;
@@ -48,147 +35,141 @@ type MarkdownTheme = {
 	underline: (text: string) => string;
 };
 
-export type RenderOptions = {
-	expanded: boolean;
-	isPartial: boolean;
-};
-
-export type RenderHelpers = Record<string, never>;
-
-export type RenderResult = (
-	result: {
-		content: Array<{ type: "text"; text: string }>;
-		details?: Record<string, unknown>;
-	},
-	options: RenderOptions,
-	theme: Theme,
-	helpers: RenderHelpers,
-) => Component | null;
-
-// ---- Theme adapter --------------------------------------------------------
-
-/** Map pi-coding-agent's `theme.fg("mdX", text)` API to pi-tui's MarkdownTheme. */
+/** Map Pi Theme → MarkdownTheme for pi-tui Markdown component. */
 export function toMarkdownTheme(theme: Theme): MarkdownTheme {
-	const wrap = (ansi: string) => (t: string) => `${ansi}${t}\u001b[0m`;
 	return {
-		heading: (t) => theme.fg("mdHeading", t),
-		link: (t) => theme.fg("mdLink", t),
-		linkUrl: (t) => theme.fg("mdLinkUrl", t),
-		code: (t) => theme.fg("mdCode", t),
-		codeBlock: (t) => theme.fg("mdCodeBlock", t),
-		codeBlockBorder: (t) => theme.fg("mdCodeBlockBorder", t),
-		quote: (t) => theme.fg("mdQuote", t),
-		quoteBorder: (t) => theme.fg("mdQuoteBorder", t),
-		hr: (t) => theme.fg("mdHr", t),
-		listBullet: (t) => theme.fg("mdListBullet", t),
-		bold: wrap("\u001b[1m"),
-		italic: wrap("\u001b[3m"),
-		strikethrough: wrap("\u001b[9m"),
-		underline: wrap("\u001b[4m"),
+		heading: (text) => theme.fg("mdHeading", text),
+		link: (text) => theme.fg("mdLink", text),
+		linkUrl: (url) => theme.fg("mdLinkUrl", url),
+		code: (text) => theme.fg("mdCode", text),
+		codeBlock: (text) => theme.fg("mdCodeBlock", text),
+		codeBlockBorder: (text) => theme.fg("mdCodeBlockBorder", text),
+		quote: (text) => theme.fg("mdQuote", text),
+		quoteBorder: (text) => theme.fg("mdQuoteBorder", text),
+		hr: (text) => theme.fg("mdHr", text),
+		listBullet: (text) => theme.fg("mdListBullet", text),
+		bold: (text) => `\x1b[1m${text}\x1b[0m`,
+		italic: (text) => `\x1b[3m${text}\x1b[0m`,
+		strikethrough: (text) => `\x1b[9m${text}\x1b[0m`,
+		underline: (text) => `\x1b[4m${text}\x1b[0m`,
 	};
 }
 
-// ---- Pagination -----------------------------------------------------------
+export type PaginatedText = {
+	page: string;
+	totalChars: number;
+	totalPages: number;
+};
 
-export const DEFAULT_PAGE_CHARS = 8_000;
-export const COLLAPSED_PREVIEW_CHARS = 1_500;
-
-export function paginateText(
-	text: string,
-	expanded: boolean,
-	pageChars: number = DEFAULT_PAGE_CHARS,
-): { page: string; totalChars: number; totalPages: number; pageNumber: number } {
+/** Paginate long text for expanded view; collapsed returns a short preview. */
+export function paginateText(text: string, expanded: boolean, pageChars = DEFAULT_PAGE_CHARS): PaginatedText {
 	const totalChars = text.length;
-	if (totalChars === 0) {
-		return { page: "", totalChars, totalPages: 0, pageNumber: 0 };
-	}
+	if (!text) return { page: "", totalChars: 0, totalPages: 0 };
 
 	if (!expanded) {
-		const previewLen = Math.min(COLLAPSED_PREVIEW_CHARS, totalChars);
-		return {
-			page: `${text.slice(0, previewLen)}${previewLen < totalChars ? "\n\n[…expand with Ctrl+O]" : ""}`,
-			totalChars,
-			totalPages: Math.ceil(totalChars / pageChars),
-			pageNumber: 1,
-		};
+		const preview =
+			text.length > COLLAPSED_PREVIEW_CHARS ? `${text.slice(0, COLLAPSED_PREVIEW_CHARS)}… (Ctrl+O to expand)` : text;
+		return { page: preview, totalChars, totalPages: 1 };
 	}
 
 	const totalPages = Math.max(1, Math.ceil(totalChars / pageChars));
 	const page = text.slice(0, pageChars);
-	return {
-		page: totalChars > pageChars ? `${page}\n\n[page 1/${totalPages} — ${totalChars} chars total]` : page,
-		totalChars,
-		totalPages,
-		pageNumber: 1,
-	};
+	const footer = totalPages > 1 ? `\n\n---\n[page 1/${totalPages} — ${totalChars.toLocaleString()} chars total]` : "";
+	return { page: page + footer, totalChars, totalPages };
 }
 
-// ---- Markdown helpers -----------------------------------------------------
+function firstText(result: { content?: Array<{ type?: string; text?: string }> }): string {
+	const block = result.content?.find((c) => c.type === "text");
+	return block?.text ?? "";
+}
 
-const mdHeading = (mt: MarkdownTheme, level: number, text: string) => `${"#".repeat(level)} ${mt.heading(text)}`;
+/** Wrap Markdown so pi-tui Box paints full-width `toolSuccess` background (see pi-tui Box.setBgFn). */
+function wrapToolResultMarkdown(theme: Theme, markdown: string): InstanceType<typeof Box> {
+	const md = new Markdown(markdown, 0, 0, toMarkdownTheme(theme));
+	const box = new Box(0, 0);
+	box.addChild(md);
+	box.setBgFn((text) => theme.bg(TOOL_RESULT_BG, preserveBoxBackground(text)));
+	return box;
+}
 
-const mdLink = (mt: MarkdownTheme, label: string, url: string) => `[${mt.link(label)}](${mt.linkUrl(url)})`;
+function preserveBoxBackground(ansi: string): string {
+	return ansi.replace(ANSI_CAPTURE_RE, (_seq, params: string) => {
+		if (!params || params === "0") return RESET_WITHOUT_BG;
+		const parts = params.split(";").filter(Boolean);
+		const kept: string[] = [];
+		let i = 0;
+		while (i < parts.length) {
+			const code = Number(parts[i]);
+			if (code === 38) {
+				kept.push(parts[i]);
+				if (parts[i + 1] === "5") {
+					kept.push(parts[i + 1], parts[i + 2]);
+					i += 3;
+				} else if (parts[i + 1] === "2") {
+					kept.push(parts[i + 1], parts[i + 2], parts[i + 3], parts[i + 4]);
+					i += 5;
+				} else {
+					i++;
+				}
+			} else if (code === 48) {
+				if (parts[i + 1] === "5") i += 3;
+				else if (parts[i + 1] === "2") i += 6;
+				else i++;
+			} else if (code === 49 || (code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
+				i++;
+			} else {
+				kept.push(parts[i]);
+				i++;
+			}
+		}
+		return kept.length ? `\x1b[${kept.join(";")}m` : "";
+	});
+}
 
-const mdMuted = (mt: MarkdownTheme, text: string) => `\u001b[2m${mt.heading(text)}\u001b[0m`;
-
-// ---- Per-tool renderers ---------------------------------------------------
-
-function renderSearchResult(
-	result: { content: Array<{ type: "text"; text: string }> },
+function renderMarkdownResult(
+	result: { content?: Array<{ type?: string; text?: string }> },
 	options: RenderOptions,
 	theme: Theme,
-	_label: string,
-): Component {
-	const text = result.content[0]?.text ?? "";
-	const { page } = paginateText(text, options.expanded);
-	const mt = toMarkdownTheme(theme);
-
-	const citations = options.expanded ? dedupeCitations(extractCitationsFromMcpText(text, "exa")) : [];
-	let body = page;
-	if (citations.length > 0) {
-		body += "\n\n---\n\n**Sources**\n\n";
-		body += citations.map((c, i) => `${i + 1}. ${mdLink(mt, c.title, c.url)}`).join("\n");
-	}
-
-	return new Markdown(body, 0, 0, mt);
+): InstanceType<typeof Box> {
+	const raw = firstText(result);
+	const { page } = paginateText(raw, options.expanded ?? false);
+	return wrapToolResultMarkdown(theme, page);
 }
 
-export const renderWebsearchResult: RenderResult = (result, options, theme) =>
-	renderSearchResult(result, options, theme, "Web Search");
+export function renderWebsearchResult(
+	result: { content?: Array<{ type?: string; text?: string }> },
+	options: RenderOptions,
+	theme: Theme,
+	_context: unknown,
+) {
+	return renderMarkdownResult(result, options, theme);
+}
 
-export const renderCodesearchResult: RenderResult = (result, options, theme) =>
-	renderSearchResult(result, options, theme, "Code Search");
+export const renderCodesearchResult = renderWebsearchResult;
 
-export const renderContext7Result: RenderResult = (result, options, theme) => {
-	const text = result.content[0]?.text ?? "";
-	const { page } = paginateText(text, options.expanded);
-	const mt = toMarkdownTheme(theme);
-	const titleMatch = text.match(/^##\s+(.+)$/m);
-	const title = titleMatch ? titleMatch[1] : "Context7 Docs";
-	return new Markdown(`${mdHeading(mt, 2, title)}\n\n${page}`, 0, 0, mt);
-};
+export function renderWebFetchResult(
+	result: { content?: Array<{ type?: string; text?: string }> },
+	options: RenderOptions,
+	theme: Theme,
+	_context: unknown,
+) {
+	return renderMarkdownResult(result, options, theme);
+}
 
-export const renderDeepwikiResult: RenderResult = (result, options, theme) => {
-	const text = result.content[0]?.text ?? "";
-	const { page } = paginateText(text, options.expanded);
-	const mt = toMarkdownTheme(theme);
-	const repo = (result.details?.repo as string | undefined) ?? "";
-	const header = repo ? `${mdMuted(mt, `DeepWiki · ${repo}`)}\n\n` : "";
-	return new Markdown(`${header}${page}`, 0, 0, mt);
-};
+export function renderContext7Result(
+	result: { content?: Array<{ type?: string; text?: string }> },
+	options: RenderOptions,
+	theme: Theme,
+	_context: unknown,
+) {
+	return renderMarkdownResult(result, options, theme);
+}
 
-export const renderWebFetchResult: RenderResult = (result, options, theme) => {
-	const text = result.content[0]?.text ?? "";
-	const { page } = paginateText(text, options.expanded);
-	const mt = toMarkdownTheme(theme);
-	const url = (result.details?.url as string | undefined) ?? "";
-	const header = url ? `${mdMuted(mt, url)}\n\n` : "";
-	return new Markdown(`${header}${page}`, 0, 0, mt);
-};
-
-// ---- Partial-result helper ------------------------------------------------
-
-/** Render a "still working…" line for streaming updates. */
-export function renderPartial(_theme: Theme, message: string): Component {
-	return new Text(message, 0, 0);
+export function renderDeepwikiResult(
+	result: { content?: Array<{ type?: string; text?: string }> },
+	options: RenderOptions,
+	theme: Theme,
+	_context: unknown,
+) {
+	return renderMarkdownResult(result, options, theme);
 }

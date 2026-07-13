@@ -1,6 +1,6 @@
 {
 	"name": "@heyhuynhgiabuu/pi-search",
-	"version": "0.3.0",
+	"version": "0.2.7",
 	"description": "Research tools for the Pi coding agent: websearch, codesearch, context7, deepwiki, web_fetch, get_fetch_content.",
 	"type": "module",
 	"license": "MIT",

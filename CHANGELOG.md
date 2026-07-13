@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.3.0
+## 0.2.7 - 2026-07-13
 
-### Minor Changes
+### Patch Changes
 
-- Prefix tool titles with `⚙` icon and honor the configured Pi expand-tool keybinding in result output. Fix the DeepWiki `ask_question` request to use its required `repoName` argument.
+- Prefix tool titles with `⚙` icon with theme-aware dim expand/collapse keybinding hints across all tools. Fix the DeepWiki `ask_question` request to use its required `repoName` argument.
 
 ## 0.2.6 - 2026-07-01
 

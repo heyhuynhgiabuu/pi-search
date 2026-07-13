@@ -1,4 +1,3 @@
-import { keyHint } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import {
 	COLLAPSED_PREVIEW_CHARS,
@@ -15,7 +14,6 @@ import {
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@earendil-works/pi-coding-agent")>()),
-	keyHint: vi.fn(() => "configured expand key"),
 	keyText: vi.fn(() => "ctrl+o"),
 }));
 
@@ -59,34 +57,35 @@ describe("render", () => {
 
 	describe("paginateText", () => {
 		it("returns empty for empty text", () => {
-			const r = paginateText("", true);
+			const r = paginateText("", true, makeTheme());
 			expect(r.page).toBe("");
 			expect(r.totalChars).toBe(0);
 			expect(r.totalPages).toBe(0);
 		});
 
 		it("returns full text when expanded and short", () => {
-			const r = paginateText("hello", true, 1000);
+			const r = paginateText("hello", true, makeTheme(), 1000);
 			expect(r.page).toBe("hello");
 			expect(r.totalPages).toBe(1);
 		});
 
-		it("truncates when collapsed", () => {
+		it("truncates when collapsed and wraps hint in dim styling", () => {
 			const text = "x".repeat(COLLAPSED_PREVIEW_CHARS + 100);
-			const r = paginateText(text, false);
+			const theme = makeTheme();
+			const r = paginateText(text, false, theme);
 			expect(r.page.length).toBeLessThan(text.length);
-			expect(r.page).toContain("configured expand key");
-			expect(keyHint).toHaveBeenCalledWith("app.tools.expand", "to expand/collapse");
+			expect(r.page).toContain(theme.fg("dim", "(ctrl+o to expand/collapse)"));
 		});
 
-		it("appends expand hint to short text when collapsed", () => {
-			const r = paginateText("short", false);
-			expect(r.page).toBe("short (configured expand key)");
+		it("appends dim-styled expand hint to short text when collapsed", () => {
+			const theme = makeTheme();
+			const r = paginateText("short", false, theme);
+			expect(r.page).toBe(`short ${theme.fg("dim", "(ctrl+o to expand/collapse)")}`);
 		});
 
 		it("adds page footer when expanded and long", () => {
 			const text = "x".repeat(DEFAULT_PAGE_CHARS + 1000);
-			const r = paginateText(text, true);
+			const r = paginateText(text, true, makeTheme());
 			expect(r.page).toContain("[page 1/");
 			expect(r.totalPages).toBeGreaterThan(1);
 		});

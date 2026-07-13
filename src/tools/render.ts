@@ -1,4 +1,4 @@
-import { keyHint, keyText, rawKeyHint, type Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box, Markdown, Text } from "@earendil-works/pi-tui";
 
 /** Theme color for tool result panel background (matches pi-pretty `toolSuccess`). */
@@ -8,10 +8,8 @@ export function renderToolCall(toolName: string): (_args: unknown, theme: Theme)
 	return (_args, theme) => new Text(theme.fg("toolTitle", `⚙ ${toolName}`), 0, 0);
 }
 
-function expandToolHint(): string {
-	return keyText("app.tools.expand")
-		? keyHint("app.tools.expand", "to expand/collapse")
-		: rawKeyHint("ctrl+o", "to expand/collapse");
+function expandToolHint(theme: Theme): string {
+	return theme.fg("dim", `(${keyText("app.tools.expand") ?? "ctrl+o"} to expand/collapse)`);
 }
 const ESC_RE = "\u001b";
 const ANSI_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([0-9;]*)m`, "g");
@@ -72,15 +70,20 @@ export type PaginatedText = {
 };
 
 /** Paginate long text for expanded view; collapsed returns a short preview. */
-export function paginateText(text: string, expanded: boolean, pageChars = DEFAULT_PAGE_CHARS): PaginatedText {
+export function paginateText(
+	text: string,
+	expanded: boolean,
+	theme: Theme,
+	pageChars = DEFAULT_PAGE_CHARS,
+): PaginatedText {
 	const totalChars = text.length;
 	if (!text) return { page: "", totalChars: 0, totalPages: 0 };
 
 	if (!expanded) {
 		const preview =
 			text.length > COLLAPSED_PREVIEW_CHARS
-				? `${text.slice(0, COLLAPSED_PREVIEW_CHARS)}… (${expandToolHint()})`
-				: `${text} (${expandToolHint()})`;
+				? `${text.slice(0, COLLAPSED_PREVIEW_CHARS)}… ${expandToolHint(theme)}`
+				: `${text} ${expandToolHint(theme)}`;
 		return { page: preview, totalChars, totalPages: 1 };
 	}
 
@@ -144,7 +147,7 @@ function renderMarkdownResult(
 	theme: Theme,
 ): InstanceType<typeof Box> {
 	const raw = firstText(result);
-	const { page } = paginateText(raw, options.expanded ?? false);
+	const { page } = paginateText(raw, options.expanded ?? false, theme);
 	return wrapToolResultMarkdown(theme, page);
 }
 

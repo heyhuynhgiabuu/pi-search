@@ -12,8 +12,7 @@ import {
 	toMarkdownTheme,
 } from "../src/tools/render.js";
 
-vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
-	...(await importOriginal<typeof import("@earendil-works/pi-coding-agent")>()),
+vi.mock("@earendil-works/pi-coding-agent", () => ({
 	keyText: vi.fn(() => "ctrl+o"),
 }));
 

@@ -30,7 +30,7 @@ If you also use [pi-web-access](https://github.com/nicobailon/pi-web-access), se
 | `websearch` | Search the open web | Exa discovery; `includeContent: true` fetches up to 5 result URLs for `get_fetch_content`. |
 | `codesearch` | Code/library search | Looking for API references, library patterns, implementation examples. |
 | `context7` | Up-to-date library docs | Fetch current documentation for a library: `libraryName: "react"`, `topic: "hooks"`. |
-| `deepwiki` | Ask about a public GitHub repo | `repo: "facebook/react"`, `question: "How does the reconciler work?"`. |
+| `deepwiki` | Ask about a public GitHub repo | `repoName: "facebook/react"`, `question: "How does the reconciler work?"`. |
 | `web_fetch` | Extract readable content from a URL | HTML, **PDF text** (no OCR), GitHub API; disk cache `~/.pi/pi-search-fetch-cache/` (7d). |
 | `get_fetch_content` | Read stored fetch body | `fetchId` or `list: true`. Session JSONL (1h) + disk cache (7d). |
 

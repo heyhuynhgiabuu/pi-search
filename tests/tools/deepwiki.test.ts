@@ -18,23 +18,28 @@ describe("deepwiki tool", () => {
 		const tool = createDeepwikiTool({} as never);
 		expect(tool.name).toBe("deepwiki");
 		expect(tool.label).toBe("DeepWiki");
+		expect(tool.parameters).toMatchObject({
+			required: ["repoName", "question"],
+			properties: { repoName: expect.any(Object), question: expect.any(Object) },
+		});
+		expect(tool.parameters.properties).not.toHaveProperty("repo");
 	});
 
-	it("rejects missing repo with validation_error", async () => {
+	it("rejects missing repoName with validation_error", async () => {
 		const tool = createDeepwikiTool({} as never);
 		const result = await tool.execute("id", { question: "what is X?" }, undefined, undefined);
 		expect((result.details as { error: { code: string } }).error.code).toBe("validation_error");
-		expect((result.details as { error: { message: string } }).error.message).toMatch(/repo/);
+		expect((result.details as { error: { message: string } }).error.message).toMatch(/repoName/);
 	});
 
 	it("rejects missing question with validation_error", async () => {
 		const tool = createDeepwikiTool({} as never);
-		const result = await tool.execute("id", { repo: "facebook/react" }, undefined, undefined);
+		const result = await tool.execute("id", { repoName: "facebook/react" }, undefined, undefined);
 		expect((result.details as { error: { code: string } }).error.code).toBe("validation_error");
 		expect((result.details as { error: { message: string } }).error.message).toMatch(/question/);
 	});
 
-	it("calls the deepwiki MCP server with repo + question", async () => {
+	it("calls the deepwiki MCP server with repoName + question", async () => {
 		globalThis.fetch = vi
 			.fn()
 			.mockResolvedValue(
@@ -47,7 +52,7 @@ describe("deepwiki tool", () => {
 		const tool = createDeepwikiTool({} as never);
 		const result = await tool.execute(
 			"id",
-			{ repo: "facebook/react", question: "How do hooks work?" },
+			{ repoName: "facebook/react", question: "How do hooks work?" },
 			undefined,
 			undefined,
 		);
@@ -58,7 +63,7 @@ describe("deepwiki tool", () => {
 		expect(body.method).toBe("tools/call");
 		expect(body.params).toEqual({
 			name: "ask_question",
-			arguments: { repo: "facebook/react", question: "How do hooks work?" },
+			arguments: { repoName: "facebook/react", question: "How do hooks work?" },
 		});
 	});
 
@@ -67,14 +72,14 @@ describe("deepwiki tool", () => {
 			.fn()
 			.mockResolvedValue(new Response("server error", { status: 503 })) as unknown as typeof fetch;
 		const tool = createDeepwikiTool({} as never);
-		const result = await tool.execute("id", { repo: "facebook/react", question: "x" }, undefined, undefined);
+		const result = await tool.execute("id", { repoName: "facebook/react", question: "x" }, undefined, undefined);
 		expect((result.details as { error: { code: string } }).error.code).toBe("mcp_unavailable");
 	});
 
 	it("respects deepwiki disabledTools", async () => {
 		process.env.PI_SEARCH_DISABLED_TOOLS = "deepwiki";
 		const tool = createDeepwikiTool({} as never);
-		const result = await tool.execute("id", { repo: "facebook/react", question: "x" }, undefined, undefined);
+		const result = await tool.execute("id", { repoName: "facebook/react", question: "x" }, undefined, undefined);
 		expect((result.details as { error: { code: string } }).error.code).toBe("validation_error");
 	});
 });

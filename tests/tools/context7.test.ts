@@ -17,7 +17,7 @@ describe("context7 tool", () => {
 	it("has the expected schema and label", () => {
 		const tool = createContext7Tool({} as never);
 		expect(tool.name).toBe("context7");
-		expect(tool.label).toBe("Context7 Docs");
+		expect(tool.label).toBe("⚙ context7");
 	});
 
 	it("rejects missing libraryName with validation_error", async () => {

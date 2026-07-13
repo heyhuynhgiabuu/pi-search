@@ -7,16 +7,16 @@ describe("pi-search extension", () => {
 		expect(TOOL_NAMES).toEqual(["websearch", "codesearch", "context7", "deepwiki", "web_fetch", "get_fetch_content"]);
 	});
 
-	it("extension registers all tools by default", () => {
-		const registered: string[] = [];
+	it("extension registers all tools with the pi-search title icon", () => {
+		const registered: Array<{ name: string; label: string }> = [];
 		const fakePi = {
-			registerTool(tool: { name: string }) {
-				registered.push(tool.name);
+			registerTool(tool: { name: string; label: string }) {
+				registered.push(tool);
 			},
 			on() {},
 		} as never;
 		piSearchExtension(fakePi);
-		expect(registered.sort()).toEqual([
+		expect(registered.map((tool) => tool.name).sort()).toEqual([
 			"codesearch",
 			"context7",
 			"deepwiki",
@@ -24,6 +24,15 @@ describe("pi-search extension", () => {
 			"web_fetch",
 			"websearch",
 		]);
+		expect(registered.every((tool) => tool.label.startsWith("⚙ "))).toBe(true);
+		expect(Object.fromEntries(registered.map((tool) => [tool.name, tool.label]))).toEqual({
+			websearch: "⚙ websearch",
+			codesearch: "⚙ codesearch",
+			context7: "⚙ context7",
+			deepwiki: "⚙ deepwiki",
+			web_fetch: "⚙ web_fetch",
+			get_fetch_content: "⚙ get_fetch_content",
+		});
 		expect(typeof (fakePi as { on?: unknown }).on).toBe("function");
 	});
 

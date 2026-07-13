@@ -17,7 +17,7 @@ describe("deepwiki tool", () => {
 	it("has the expected schema and label", () => {
 		const tool = createDeepwikiTool({} as never);
 		expect(tool.name).toBe("deepwiki");
-		expect(tool.label).toBe("DeepWiki");
+		expect(tool.label).toBe("⚙ deepwiki");
 		expect(tool.parameters).toMatchObject({
 			required: ["repoName", "question"],
 			properties: { repoName: expect.any(Object), question: expect.any(Object) },

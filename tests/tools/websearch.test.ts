@@ -31,7 +31,7 @@ describe("websearch tool", () => {
 	it("returns the expected schema name and label", () => {
 		const tool = createWebsearchTool({ appendEntry: vi.fn(), on: vi.fn() } as never, baseConfig());
 		expect(tool.name).toBe("websearch");
-		expect(tool.label).toBe("Web Search");
+		expect(tool.label).toBe("⚙ websearch");
 	});
 
 	it("calls the direct REST Exa endpoint with effective params", async () => {

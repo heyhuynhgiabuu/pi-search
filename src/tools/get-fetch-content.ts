@@ -2,6 +2,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { buildErrorResult, toPiSearchError, ValidationError } from "../errors.js";
 import { getFetchContent, listFetchContent } from "../fetch/content-store.js";
+import { renderFetchContentResult, renderToolCall } from "./render.js";
 
 const DEFAULT_SLICE_CHARS = 50_000;
 const MAX_SLICE_CHARS = 200_000;
@@ -9,7 +10,9 @@ const MAX_SLICE_CHARS = 200_000;
 export function createGetFetchContentTool(): ToolDefinition {
 	return {
 		name: "get_fetch_content",
-		label: "Get Fetch Content",
+		label: "⚙ get_fetch_content",
+		renderCall: renderToolCall("get_fetch_content"),
+		renderResult: renderFetchContentResult,
 		description:
 			"Retrieve full text from a prior web_fetch when the tool response was truncated. Use fetchId from web_fetch details, or list=true to see recent stored fetches.",
 		parameters: Type.Object({

@@ -1,8 +1,18 @@
-import type { Theme } from "@earendil-works/pi-coding-agent";
-import { Box, Markdown } from "@earendil-works/pi-tui";
+import { keyHint, keyText, rawKeyHint, type Theme } from "@earendil-works/pi-coding-agent";
+import { Box, Markdown, Text } from "@earendil-works/pi-tui";
 
 /** Theme color for tool result panel background (matches pi-pretty `toolSuccess`). */
 const TOOL_RESULT_BG: Parameters<Theme["bg"]>[0] = "toolSuccessBg";
+
+export function renderToolCall(toolName: string): (_args: unknown, theme: Theme) => Text {
+	return (_args, theme) => new Text(theme.fg("toolTitle", `⚙ ${toolName}`), 0, 0);
+}
+
+function expandToolHint(): string {
+	return keyText("app.tools.expand")
+		? keyHint("app.tools.expand", "to expand/collapse")
+		: rawKeyHint("ctrl+o", "to expand/collapse");
+}
 const ESC_RE = "\u001b";
 const ANSI_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([0-9;]*)m`, "g");
 const RESET_WITHOUT_BG = "\x1b[22;23;24;25;27;28;29;39m";
@@ -68,7 +78,9 @@ export function paginateText(text: string, expanded: boolean, pageChars = DEFAUL
 
 	if (!expanded) {
 		const preview =
-			text.length > COLLAPSED_PREVIEW_CHARS ? `${text.slice(0, COLLAPSED_PREVIEW_CHARS)}… (ctrl+o to expand)` : text;
+			text.length > COLLAPSED_PREVIEW_CHARS
+				? `${text.slice(0, COLLAPSED_PREVIEW_CHARS)}… (${expandToolHint()})`
+				: `${text} (${expandToolHint()})`;
 		return { page: preview, totalChars, totalPages: 1 };
 	}
 
@@ -166,6 +178,15 @@ export function renderContext7Result(
 }
 
 export function renderDeepwikiResult(
+	result: { content?: Array<{ type?: string; text?: string }> },
+	options: RenderOptions,
+	theme: Theme,
+	_context: unknown,
+) {
+	return renderMarkdownResult(result, options, theme);
+}
+
+export function renderFetchContentResult(
 	result: { content?: Array<{ type?: string; text?: string }> },
 	options: RenderOptions,
 	theme: Theme,

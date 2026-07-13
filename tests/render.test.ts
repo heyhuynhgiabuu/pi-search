@@ -1,15 +1,23 @@
-import { describe, expect, it } from "vitest";
-import type { Theme } from "../src/tools/render.js";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { describe, expect, it, vi } from "vitest";
 import {
 	COLLAPSED_PREVIEW_CHARS,
 	DEFAULT_PAGE_CHARS,
 	paginateText,
 	renderContext7Result,
 	renderDeepwikiResult,
+	renderToolCall,
 	renderWebFetchResult,
 	renderWebsearchResult,
+	type Theme,
 	toMarkdownTheme,
 } from "../src/tools/render.js";
+
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@earendil-works/pi-coding-agent")>()),
+	keyHint: vi.fn(() => "configured expand key"),
+	keyText: vi.fn(() => "ctrl+o"),
+}));
 
 /** Minimal Theme for testing — wraps with ANSI codes. */
 const makeTheme = (): Theme => ({
@@ -23,6 +31,12 @@ const baseResult = (text: string) => ({
 });
 
 describe("render", () => {
+	it("renders the prefixed callable tool name", () => {
+		expect(renderToolCall("websearch")(undefined, makeTheme()).render(80)[0]?.trimEnd()).toBe(
+			"<toolTitle>⚙ websearch</toolTitle>",
+		);
+	});
+
 	describe("toMarkdownTheme", () => {
 		it("maps theme.fg calls into a MarkdownTheme", () => {
 			const theme = makeTheme();
@@ -61,7 +75,13 @@ describe("render", () => {
 			const text = "x".repeat(COLLAPSED_PREVIEW_CHARS + 100);
 			const r = paginateText(text, false);
 			expect(r.page.length).toBeLessThan(text.length);
-			expect(r.page).toContain("ctrl+o");
+			expect(r.page).toContain("configured expand key");
+			expect(keyHint).toHaveBeenCalledWith("app.tools.expand", "to expand/collapse");
+		});
+
+		it("appends expand hint to short text when collapsed", () => {
+			const r = paginateText("short", false);
+			expect(r.page).toBe("short (configured expand key)");
 		});
 
 		it("adds page footer when expanded and long", () => {

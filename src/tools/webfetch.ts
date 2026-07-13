@@ -4,6 +4,7 @@ import { buildErrorResult, toPiSearchError } from "../errors.js";
 import { FETCH_CONTENT_CUSTOM_TYPE, putFetchContent, WEB_FETCH_INLINE_MAX_CHARS } from "../fetch/content-store.js";
 import { resolveUrlContent } from "../fetch/resolve-content.js";
 import type { ResolvedConfig } from "../types.js";
+import { renderToolCall, renderWebFetchResult } from "./render.js";
 
 const DEFAULT_MAX_OUTPUT_CHARS = 50_000;
 const MAX_OUTPUT_CHARS_LIMIT = 200_000;
@@ -11,7 +12,9 @@ const MAX_OUTPUT_CHARS_LIMIT = 200_000;
 export function createWebFetchTool(pi: ExtensionAPI, config: ResolvedConfig): ToolDefinition {
 	return {
 		name: "web_fetch",
-		label: "Web Fetch",
+		label: "⚙ web_fetch",
+		renderCall: renderToolCall("web_fetch"),
+		renderResult: renderWebFetchResult,
 		description:
 			"Fetch a URL and return readable content (Readability/turndown for HTML; Jina Reader fallback on thin/consent pages; GitHub URLs via API). Large pages store full text — use fetchId with get_fetch_content. Survives Pi session resume via session JSONL. For local video/PDF use pi-web-access fetch_content.",
 		parameters: Type.Object({

@@ -10,14 +10,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { resolveConfig } from "../config.js";
 import { buildErrorResult, toPiSearchError, ValidationError } from "../errors.js";
-import { renderDeepwikiResult } from "./render.js";
+import { renderDeepwikiResult, renderToolCall } from "./render.js";
 
 const DEEPWIKI_ASK_TOOL = "ask_question";
 
 export function createDeepwikiTool(_pi: ExtensionAPI) {
 	return {
 		name: "deepwiki",
-		label: "DeepWiki",
+		label: "⚙ deepwiki",
 		description:
 			"Ask questions about any public GitHub repository. Powered by DeepWiki. Use repoName='owner/name' (e.g. 'facebook/react') and a natural-language question. Returns synthesized answer with citations to source files.",
 		parameters: Type.Object({
@@ -69,6 +69,7 @@ export function createDeepwikiTool(_pi: ExtensionAPI) {
 				return buildErrorResult(toPiSearchError(error));
 			}
 		},
+		renderCall: renderToolCall("deepwiki"),
 		renderResult: renderDeepwikiResult,
 	};
 }

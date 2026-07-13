@@ -12,7 +12,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { resolveConfig } from "../config.js";
 import { buildErrorResult, FetchError, toPiSearchError, ValidationError } from "../errors.js";
-import { renderContext7Result } from "./render.js";
+import { renderContext7Result, renderToolCall } from "./render.js";
 
 const CONTEXT7_API = "https://context7.com/api/v1";
 
@@ -35,7 +35,7 @@ type Context7DocsResponse = {
 export function createContext7Tool(_pi: ExtensionAPI) {
 	return {
 		name: "context7",
-		label: "Context7 Docs",
+		label: "⚙ context7",
 		description:
 			"Fetch up-to-date documentation and code examples for a library via Context7. Use libraryName='react' or '/reactjs/react.dev' for the official React docs, '/vercel/next.js' for Next.js, etc. Returns ready-to-use code snippets and citations.",
 		parameters: Type.Object({
@@ -98,6 +98,7 @@ export function createContext7Tool(_pi: ExtensionAPI) {
 				return buildErrorResult(toPiSearchError(error));
 			}
 		},
+		renderCall: renderToolCall("context7"),
 		renderResult: renderContext7Result,
 	};
 }

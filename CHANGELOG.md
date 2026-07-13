@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+### Minor Changes
+
+- Prefix tool titles with `⚙` icon and honor the configured Pi expand-tool keybinding in result output. Fix the DeepWiki `ask_question` request to use its required `repoName` argument.
+
 ## 0.2.6 - 2026-07-01
 
 ### Fixed

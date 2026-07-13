@@ -22,7 +22,7 @@ import {
 } from "../exa/params.js";
 import type { NormalizedExaResult } from "../types.js";
 import { dedupeCitations, extractCitationsFromMcpText } from "./citations.js";
-import { renderCodesearchResult } from "./render.js";
+import { renderCodesearchResult, renderToolCall } from "./render.js";
 
 type ExaQueryRun = {
 	query: string;
@@ -36,7 +36,7 @@ const CODE_SEARCH_TYPES = ["auto", "neural", "instant"] as const;
 export function createCodesearchTool(_pi: ExtensionAPI) {
 	return {
 		name: "codesearch",
-		label: "Code Search",
+		label: "⚙ codesearch",
 		description:
 			"Search for code-relevant sources (docs, examples, library references) via Exa. Use this when looking for API references, library patterns, or implementation examples. Prefer websearch for general topical research.",
 		parameters: Type.Object({
@@ -101,6 +101,7 @@ export function createCodesearchTool(_pi: ExtensionAPI) {
 				return buildErrorResult(toPiSearchError(error));
 			}
 		},
+		renderCall: renderToolCall("codesearch"),
 		renderResult: renderCodesearchResult,
 	};
 }

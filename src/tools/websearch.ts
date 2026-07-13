@@ -12,12 +12,12 @@ import {
 import { fetchSearchResultUrlsInBackground } from "../fetch/search-content.js";
 import { runWebsearchQueries } from "../search/run-websearch.js";
 import type { ExaQueryRun, ResolvedConfig } from "../types.js";
-import { renderWebsearchResult } from "./render.js";
+import { renderToolCall, renderWebsearchResult } from "./render.js";
 
 export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): ToolDefinition {
 	return {
 		name: "websearch",
-		label: "Web Search",
+		label: "⚙ websearch",
 		description:
 			"Search the open web for source discovery (Exa). Returns URL, title, published date, and a short highlight per result. Use searchType='deep' / 'deep-reasoning' for sitreps; recencyFilter and domainFilter to shape results. Prefer this over pi-web-access web_search when you need Exa deep modes or cited highlights—not synthesized answers or browser curation. Optional BRAVE_API_KEY enables failover when Exa fails or returns no results.",
 		parameters: Type.Object({
@@ -128,6 +128,7 @@ export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): T
 				return buildErrorResult(toPiSearchError(error));
 			}
 		},
+		renderCall: renderToolCall("websearch"),
 		renderResult: renderWebsearchResult as never,
 	};
 }

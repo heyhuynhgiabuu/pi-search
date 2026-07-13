@@ -18,7 +18,7 @@ describe("codesearch tool", () => {
 	it("has the expected schema and label", () => {
 		const tool = createCodesearchTool({} as never);
 		expect(tool.name).toBe("codesearch");
-		expect(tool.label).toBe("Code Search");
+		expect(tool.label).toBe("⚙ codesearch");
 	});
 
 	it("calls the direct REST endpoint with default searchType=neural", async () => {

@@ -5,7 +5,7 @@
 [![Versioning](https://img.shields.io/badge/versioning-Changesets-7C3AED?style=for-the-badge)](https://github.com/changesets/changesets)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-Six research tools for the Pi coding agent: `websearch`, `codesearch`, `context7`, `deepwiki`, `web_fetch`, `get_fetch_content`.
+Eight research tools for the Pi coding agent: `websearch`, `codesearch`, `context7`, `deepwiki`, `web_fetch`, `get_fetch_content`, `firecrawl_scrape`, `firecrawl_crawl`.
 
 - **Zero-config by default** — works with no API key via the Exa MCP server
 - **Full feature access when configured** — set `EXA_API_KEY` to unlock `searchType: deep`, `recencyFilter`, `domainFilter`, `highlights` etc. via direct REST
@@ -33,6 +33,8 @@ If you also use [pi-web-access](https://github.com/nicobailon/pi-web-access), se
 | `deepwiki` | Ask about a public GitHub repo | `repoName: "facebook/react"`, `question: "How does the reconciler work?"`. |
 | `web_fetch` | Extract readable content from a URL | HTML, **PDF text** (no OCR), GitHub API; disk cache `~/.pi/pi-search-fetch-cache/` (7d). |
 | `get_fetch_content` | Read stored fetch body | `fetchId` or `list: true`. Session JSONL (1h) + disk cache (7d). |
+| `firecrawl_scrape` | Scrape a single URL via Firecrawl | Get clean Markdown from any public page. Uses Firecrawl rendering engine. |
+| `firecrawl_crawl` | Crawl a website via Firecrawl | Collect multiple pages from a site. Polls async job to completion. Supports path filters and pagination. ⚠ Consumes credits. |
 
 ## Configuration
 
@@ -42,6 +44,7 @@ Optional. Create `~/.pi/pi-search.json`:
 {
   "exaApiKey": "your-exa-api-key",
   "braveApiKey": "your-brave-api-key",
+  "firecrawlApiKey": "your-firecrawl-api-key",
   "disabledTools": ["codesearch"],
   "mcpTimeoutMs": 30000,
   "ssrf": {
@@ -57,6 +60,7 @@ Or set environment variables:
 ```bash
 export EXA_API_KEY=your-key
 export BRAVE_API_KEY=your-brave-key   # optional; failover (free key: https://brave.com/search/api/)
+export FIRECRAWL_API_KEY=your-key     # optional; required for firecrawl_scrape and firecrawl_crawl
 export PI_SEARCH_DISABLED_TOOLS=codesearch,deepwiki
 export PI_SEARCH_USE_REST=true        # force direct REST (default: false; auto-enabled when EXA_API_KEY is set)
 export PI_SEARCH_CONFIG_PATH=/path/to/config.json
@@ -74,13 +78,13 @@ Resolution order (highest priority first):
 - If `EXA_API_KEY` is set (or `PI_SEARCH_USE_REST=true`), they call `https://api.exa.ai/search` directly. This unlocks the full Exa feature surface.
 - Otherwise they fall back to `https://mcp.exa.ai/mcp` (the public MCP server, no key required). Feature set is narrower.
 
-`context7`, `deepwiki`, and `web_fetch` always use their respective providers regardless.
+`context7`, `deepwiki`, `web_fetch`, `firecrawl_scrape`, and `firecrawl_crawl` always use their respective providers regardless.
 
 ## Architecture
 
 ```
 src/
-├── index.ts          # extension entrypoint, wires the 5 tools
+├── index.ts          # extension entrypoint, wires the 8 tools
 ├── config.ts         # env + ~/.pi/pi-search.json resolution
 ├── errors.ts         # coded errors (validation_error, mcp_error, …)
 ├── types.ts          # shared types

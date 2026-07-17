@@ -22,6 +22,8 @@ import { type FetchSessionRestoreContext, restoreFetchContentFromSession } from 
 import { createCodesearchTool } from "./tools/codesearch.js";
 import { createContext7Tool } from "./tools/context7.js";
 import { createDeepwikiTool } from "./tools/deepwiki.js";
+import { createFirecrawlCrawlTool } from "./tools/firecrawl-crawl.js";
+import { createFirecrawlScrapeTool } from "./tools/firecrawl-scrape.js";
 import { createGetFetchContentTool } from "./tools/get-fetch-content.js";
 import { createWebFetchTool } from "./tools/webfetch.js";
 import { createWebsearchTool } from "./tools/websearch.js";
@@ -33,6 +35,8 @@ export const TOOL_NAMES = [
 	"deepwiki",
 	"web_fetch",
 	"get_fetch_content",
+	"firecrawl_scrape",
+	"firecrawl_crawl",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
@@ -48,6 +52,8 @@ export default function piSearchExtension(pi: ExtensionAPI): void {
 	if (enabled("deepwiki")) pi.registerTool(createDeepwikiTool(pi) as never);
 	if (enabled("web_fetch")) pi.registerTool(createWebFetchTool(pi, config) as never);
 	if (enabled("get_fetch_content")) pi.registerTool(createGetFetchContentTool() as never);
+	if (enabled("firecrawl_scrape")) pi.registerTool(createFirecrawlScrapeTool(pi, config) as never);
+	if (enabled("firecrawl_crawl")) pi.registerTool(createFirecrawlCrawlTool(pi, config) as never);
 
 	const hydrateFetchStore = async (_event: unknown, ctx: FetchSessionRestoreContext) => {
 		restoreFetchContentFromSession(ctx);

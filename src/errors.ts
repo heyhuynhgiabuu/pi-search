@@ -25,6 +25,10 @@ export type ErrorCode =
 	| "exa_unauthorized"
 	| "exa_rate_limited"
 	| "exa_timeout"
+	// firecrawl provider
+	| "firecrawl_auth_error"
+	| "firecrawl_rate_limited"
+	| "firecrawl_timeout"
 	// mcp
 	| "mcp_error"
 	| "mcp_timeout"

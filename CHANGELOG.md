@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0
+
+### Minor Changes
+
+- Add optional native `firecrawl_scrape` and `firecrawl_crawl` tools
+
+  Adds Firecrawl REST client at `src/firecrawl/client.ts` with bearer auth, injected fetch seam, and provider error mapping. Exposes two new tools:
+
+  - `firecrawl_scrape` — scrape a URL via Firecrawl v2, returns stored content
+  - `firecrawl_crawl` — async crawl via Firecrawl v2 with polling, pagination, cancellation, and stored results
+
+  Configuration via `FIRECRAWL_API_KEY` env var or `firecrawlApiKey` in `~/.pi/pi-search.json`. Error codes: `firecrawl_auth_error` (401/403), `firecrawl_rate_limited` (429), `firecrawl_timeout` (crawl timeout).
+
+  ### Changes
+
+  - **firecrawl_scrape**: defaults `onlyMainContent` to `true` and `formats` to `['markdown']`; validates URLs are http/https; passes `AbortSignal` for cancellation.
+  - **firecrawl_crawl**: accepts `onUpdate` callback for progress; follows pagination via `next` URLs (absolute, origin-validated) instead of re-polling by ID; persists content store records via `pi.appendEntry`; passes `AbortSignal` to all fetches; attempts remote DELETE cancellation on user abort and timeout (with bounded signal for the DELETE call); defaults `maxPages` to 5 (max 20).
+  - **Client**: validates all API responses from `unknown` with manual type guards (no `as T`); validates pagination URLs belong to the Firecrawl API origin; passes `AbortSignal` through all request methods.
+
 ## 0.2.7 - 2026-07-13
 
 ### Patch Changes

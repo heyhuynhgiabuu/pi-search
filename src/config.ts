@@ -26,6 +26,7 @@ export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
 type RawConfig = {
 	exaApiKey?: string;
 	braveApiKey?: string;
+	firecrawlApiKey?: string;
 	apiKey?: string; // alias
 	disabledTools?: string[];
 	useRestForExa?: boolean;
@@ -82,6 +83,7 @@ export function resolveConfig(options: ResolveConfigOptions = {}): ResolvedConfi
 
 	const exaApiKey = env.EXA_API_KEY || file.exaApiKey;
 	const braveApiKey = env.BRAVE_API_KEY || file.braveApiKey || readKetchBraveApiKey(homeDir);
+	const firecrawlApiKey = env.FIRECRAWL_API_KEY || file.firecrawlApiKey;
 	const githubToken = env.GITHUB_TOKEN || env.GH_TOKEN || file.githubToken;
 	const disabledTools = new Set<string>(
 		[
@@ -101,6 +103,7 @@ export function resolveConfig(options: ResolveConfigOptions = {}): ResolvedConfi
 	return {
 		exaApiKey,
 		braveApiKey,
+		firecrawlApiKey,
 		githubToken,
 		disabledTools,
 		useRestForExa,

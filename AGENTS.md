@@ -4,13 +4,16 @@ Guidance for coding agents working in `@heyhuynhgiabuu/pi-search`.
 
 ## Repo purpose
 
-This package ships five research tools for the Pi coding agent:
+This package ships eight research tools for the Pi coding agent:
 
 - `websearch` — open-web search via Exa (direct REST or MCP fallback)
 - `codesearch` — code/library search via Exa (direct REST or MCP fallback)
 - `context7` — up-to-date library docs
 - `deepwiki` — ask questions about any public GitHub repo
 - `web_fetch` — extract full text from a URL
+- `get_fetch_content` — retrieve stored full text from a prior fetch
+- `firecrawl_scrape` — scrape a page through Firecrawl
+- `firecrawl_crawl` — crawl a bounded set of pages through Firecrawl
 
 It is TypeScript-first and builds with `tsc` to `dist/`. The build is required because
 `package.json#pi.extensions` references the compiled output.

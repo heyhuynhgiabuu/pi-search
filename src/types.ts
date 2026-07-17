@@ -123,6 +123,7 @@ export type Citation = {
 export type ResolvedConfig = {
 	exaApiKey?: string;
 	braveApiKey?: string;
+	firecrawlApiKey?: string;
 	disabledTools: Set<string>;
 	useRestForExa: boolean;
 	mcpTimeoutMs: number;

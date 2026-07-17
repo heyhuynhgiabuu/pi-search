@@ -4,7 +4,16 @@ import piSearchExtension, { TOOL_NAMES } from "../src/index.js";
 
 describe("pi-search extension", () => {
 	it("exports tool names", () => {
-		expect(TOOL_NAMES).toEqual(["websearch", "codesearch", "context7", "deepwiki", "web_fetch", "get_fetch_content"]);
+		expect(TOOL_NAMES).toEqual([
+			"websearch",
+			"codesearch",
+			"context7",
+			"deepwiki",
+			"web_fetch",
+			"get_fetch_content",
+			"firecrawl_scrape",
+			"firecrawl_crawl",
+		]);
 	});
 
 	it("extension registers all tools with the pi-search title icon", () => {
@@ -20,6 +29,8 @@ describe("pi-search extension", () => {
 			"codesearch",
 			"context7",
 			"deepwiki",
+			"firecrawl_crawl",
+			"firecrawl_scrape",
 			"get_fetch_content",
 			"web_fetch",
 			"websearch",
@@ -32,6 +43,8 @@ describe("pi-search extension", () => {
 			deepwiki: "⚙ deepwiki",
 			web_fetch: "⚙ web_fetch",
 			get_fetch_content: "⚙ get_fetch_content",
+			firecrawl_scrape: "⚙ firecrawl_scrape",
+			firecrawl_crawl: "⚙ firecrawl_crawl",
 		});
 		expect(typeof (fakePi as { on?: unknown }).on).toBe("function");
 	});
@@ -49,7 +62,14 @@ describe("pi-search extension", () => {
 		process.env.PI_SEARCH_DISABLED_TOOLS = "codesearch,deepwiki";
 		try {
 			piSearchExtension(fakePi);
-			expect(registered.sort()).toEqual(["context7", "get_fetch_content", "web_fetch", "websearch"]);
+			expect(registered.sort()).toEqual([
+				"context7",
+				"firecrawl_crawl",
+				"firecrawl_scrape",
+				"get_fetch_content",
+				"web_fetch",
+				"websearch",
+			]);
 		} finally {
 			if (original === undefined) delete process.env.PI_SEARCH_DISABLED_TOOLS;
 			else process.env.PI_SEARCH_DISABLED_TOOLS = original;

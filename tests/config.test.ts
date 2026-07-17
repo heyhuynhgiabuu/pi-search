@@ -71,6 +71,27 @@ describe("config", () => {
 			expect([...config.disabledTools].sort()).toEqual(["codesearch", "context7", "deepwiki", "websearch"]);
 		});
 
+		it("reads firecrawlApiKey from env", () => {
+			process.env.FIRECRAWL_API_KEY = "fc-env-key";
+			const config = resolveConfig({ env: process.env, homeDir: tempDir });
+			expect(config.firecrawlApiKey).toBe("fc-env-key");
+		});
+
+		it("falls back to config file for firecrawlApiKey", () => {
+			delete process.env.FIRECRAWL_API_KEY;
+			const fileDir = join(tempDir, "fc-home");
+			require("node:fs").mkdirSync(join(fileDir, ".pi"), { recursive: true });
+			writeFileSync(join(fileDir, ".pi", "pi-search.json"), JSON.stringify({ firecrawlApiKey: "fc-file-key" }));
+			const config = resolveConfig({ env: process.env, homeDir: fileDir });
+			expect(config.firecrawlApiKey).toBe("fc-file-key");
+		});
+
+		it("firecrawlApiKey is undefined when not set", () => {
+			delete process.env.FIRECRAWL_API_KEY;
+			const config = resolveConfig({ env: process.env, homeDir: tempDir });
+			expect(config.firecrawlApiKey).toBeUndefined();
+		});
+
 		it("useRestForExa defaults to false", () => {
 			delete process.env.PI_SEARCH_USE_REST;
 			const config = resolveConfig({ env: process.env, homeDir: tempDir });

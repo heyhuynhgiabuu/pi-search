@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type TProperties } from "typebox";
 import { buildErrorResult, toPiSearchError, ValidationError } from "../errors.js";
 import {
 	DEFAULT_HIGHLIGHTS_MAX_CHARACTERS,
@@ -16,6 +16,63 @@ import { renderToolCall, renderWebsearchResult } from "./render.js";
 
 export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): ToolDefinition {
 	const canRetrieveStoredContent = !config.disabledTools.has("get_fetch_content");
+	const properties: TProperties = {
+		query: Type.Optional(Type.String({ description: "Single search query." })),
+		queries: Type.Optional(Type.Array(Type.String(), { description: "Multiple queries searched sequentially." })),
+		numResults: Type.Optional(
+			Type.Integer({
+				description: `Results per query (default ${DEFAULT_NUM_RESULTS}, max 10).`,
+				minimum: 1,
+				maximum: 10,
+			}),
+		),
+		searchType: Type.Optional(
+			Type.Union(
+				[
+					Type.Literal("auto"),
+					Type.Literal("neural"),
+					Type.Literal("instant"),
+					Type.Literal("deep"),
+					Type.Literal("deep-reasoning"),
+					Type.Literal("deep-max"),
+				],
+				{ description: "Exa search mode (default auto). Use 'deep' or 'deep-reasoning' for sitreps." },
+			),
+		),
+		recencyFilter: Type.Optional(
+			Type.Union([Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("year")], {
+				description:
+					"Filter for fresh results by relative time window. Mutually exclusive with startPublishedDate/endPublishedDate.",
+			}),
+		),
+		startPublishedDate: Type.Optional(
+			Type.String({ description: "ISO date or datetime lower bound, e.g. 2026-03-01 or 2026-03-01T00:00:00Z." }),
+		),
+		endPublishedDate: Type.Optional(Type.String({ description: "ISO date or datetime upper bound." })),
+		domainFilter: Type.Optional(
+			Type.Array(Type.String(), {
+				description:
+					"Domain shortcuts: use domain names to include them or prefix with - to exclude, e.g. ['reuters.com', '-reddit.com'].",
+			}),
+		),
+		includeDomains: Type.Optional(Type.Array(Type.String(), { description: "Explicit domains to include." })),
+		excludeDomains: Type.Optional(Type.Array(Type.String(), { description: "Explicit domains to exclude." })),
+		highlightsMaxCharacters: Type.Optional(
+			Type.Integer({
+				description: `Maximum characters for highlights (default ${DEFAULT_HIGHLIGHTS_MAX_CHARACTERS}, ${MIN_HIGHLIGHTS_MAX_CHARACTERS}-${MAX_HIGHLIGHTS_MAX_CHARACTERS}).`,
+				minimum: MIN_HIGHLIGHTS_MAX_CHARACTERS,
+				maximum: MAX_HIGHLIGHTS_MAX_CHARACTERS,
+			}),
+		),
+	};
+	if (canRetrieveStoredContent) {
+		properties.includeContent = Type.Optional(
+			Type.Boolean({
+				description:
+					"When true, fetches full page content for up to 5 result URLs in the background for get_fetch_content.",
+			}),
+		);
+	}
 
 	return {
 		name: "websearch",
@@ -27,65 +84,7 @@ export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): T
 			"Use websearch only for external or current information; do not use it for greetings or local repository search.",
 			"Use web_fetch when the user provides or selects a specific URL.",
 		],
-		parameters: Type.Object({
-			query: Type.Optional(Type.String({ description: "Single search query." })),
-			queries: Type.Optional(Type.Array(Type.String(), { description: "Multiple queries searched sequentially." })),
-			numResults: Type.Optional(
-				Type.Integer({
-					description: `Results per query (default ${DEFAULT_NUM_RESULTS}, max 10).`,
-					minimum: 1,
-					maximum: 10,
-				}),
-			),
-			...(canRetrieveStoredContent
-				? {
-						includeContent: Type.Optional(
-							Type.Boolean({
-								description:
-									"When true, fetches full page content for up to 5 result URLs in the background for get_fetch_content.",
-							}),
-						),
-					}
-				: {}),
-			searchType: Type.Optional(
-				Type.Union(
-					[
-						Type.Literal("auto"),
-						Type.Literal("neural"),
-						Type.Literal("instant"),
-						Type.Literal("deep"),
-						Type.Literal("deep-reasoning"),
-						Type.Literal("deep-max"),
-					],
-					{ description: "Exa search mode (default auto). Use 'deep' or 'deep-reasoning' for sitreps." },
-				),
-			),
-			recencyFilter: Type.Optional(
-				Type.Union([Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("year")], {
-					description:
-						"Filter for fresh results by relative time window. Mutually exclusive with startPublishedDate/endPublishedDate.",
-				}),
-			),
-			startPublishedDate: Type.Optional(
-				Type.String({ description: "ISO date or datetime lower bound, e.g. 2026-03-01 or 2026-03-01T00:00:00Z." }),
-			),
-			endPublishedDate: Type.Optional(Type.String({ description: "ISO date or datetime upper bound." })),
-			domainFilter: Type.Optional(
-				Type.Array(Type.String(), {
-					description:
-						"Domain shortcuts: use domain names to include them or prefix with - to exclude, e.g. ['reuters.com', '-reddit.com'].",
-				}),
-			),
-			includeDomains: Type.Optional(Type.Array(Type.String(), { description: "Explicit domains to include." })),
-			excludeDomains: Type.Optional(Type.Array(Type.String(), { description: "Explicit domains to exclude." })),
-			highlightsMaxCharacters: Type.Optional(
-				Type.Integer({
-					description: `Maximum characters for highlights (default ${DEFAULT_HIGHLIGHTS_MAX_CHARACTERS}, ${MIN_HIGHLIGHTS_MAX_CHARACTERS}-${MAX_HIGHLIGHTS_MAX_CHARACTERS}).`,
-					minimum: MIN_HIGHLIGHTS_MAX_CHARACTERS,
-					maximum: MAX_HIGHLIGHTS_MAX_CHARACTERS,
-				}),
-			),
-		}),
+		parameters: Type.Object(properties),
 		async execute(_id, params, signal, onUpdate) {
 			try {
 				if (signal?.aborted) {

@@ -1,6 +1,6 @@
 {
 	"name": "@heyhuynhgiabuu/pi-search",
-	"version": "0.3.2",
+	"version": "0.3.3",
 	"description": "Research tools for the Pi coding agent: web search, code search, documentation, repository Q&A, fetching, and Firecrawl scraping/crawling.",
 	"keywords": [
 		"exa",

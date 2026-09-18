@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3
+
+### Patch Changes
+
+- Simplify conditional websearch schema construction without changing its tool behavior.
+
 ## 0.3.2
 
 ### Patch Changes

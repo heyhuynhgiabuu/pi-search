@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProviderError } from "../src/errors.js";
 import { createExaRestClient, formatExaResult, normalizeExaResults } from "../src/exa/client.js";
-import type { ExaApiResult } from "../src/types.js";
 
 const _NOW = new Date("2026-06-15T12:00:00Z");
 
@@ -13,7 +12,7 @@ describe("exa/client", () => {
 
 	describe("createExaRestClient", () => {
 		it("posts to api.exa.ai/search and returns normalized shape", async () => {
-			const mockFetch = vi.fn().mockResolvedValue(
+			const mockFetch = vi.fn<typeof fetch>().mockResolvedValue(
 				new Response(
 					JSON.stringify({
 						requestId: "req_1",
@@ -34,9 +33,11 @@ describe("exa/client", () => {
 					{ status: 200, headers: { "content-type": "application/json" } },
 				),
 			);
-			globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+			globalThis.fetch = mockFetch;
 
 			const client = createExaRestClient("test-key");
+
 			const out = await client.search({
 				query: "x",
 				effectiveParams: {
@@ -55,18 +56,17 @@ describe("exa/client", () => {
 			expect(out.results[0].url).toBe("https://example.com");
 
 			// Verify the outbound request shape
-			const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+			const [url, init] = mockFetch.mock.calls[0];
 			expect(url).toBe("https://api.exa.ai/search");
-			expect((init.headers as Record<string, string>)["x-api-key"]).toBe("test-key");
-			const body = JSON.parse(init.body as string);
+			expect(new Headers(init?.headers).get("x-api-key")).toBe("test-key");
+			const body = JSON.parse(String(init?.body ?? ""));
 			expect(body).toMatchObject({ query: "x", type: "auto", numResults: 5 });
 			expect(body.contents.highlights.maxCharacters).toBe(800);
 		});
 
 		it("throws ProviderError on 401", async () => {
-			globalThis.fetch = vi
-				.fn()
-				.mockResolvedValue(new Response("unauthorized", { status: 401 })) as unknown as typeof fetch;
+			globalThis.fetch = vi.fn<typeof fetch>().mockResolvedValue(new Response("unauthorized", { status: 401 }));
+
 			const client = createExaRestClient("bad-key");
 			await expect(
 				client.search({
@@ -84,9 +84,8 @@ describe("exa/client", () => {
 		});
 
 		it("throws ProviderError on 429", async () => {
-			globalThis.fetch = vi
-				.fn()
-				.mockResolvedValue(new Response("rate-limited", { status: 429 })) as unknown as typeof fetch;
+			globalThis.fetch = vi.fn<typeof fetch>().mockResolvedValue(new Response("rate-limited", { status: 429 }));
+
 			const client = createExaRestClient("k");
 			await expect(
 				client.search({
@@ -104,9 +103,8 @@ describe("exa/client", () => {
 		});
 
 		it("throws ProviderError on invalid JSON response", async () => {
-			globalThis.fetch = vi
-				.fn()
-				.mockResolvedValue(new Response("not-json", { status: 200 })) as unknown as typeof fetch;
+			globalThis.fetch = vi.fn<typeof fetch>().mockResolvedValue(new Response("not-json", { status: 200 }));
+
 			const client = createExaRestClient("k");
 			await expect(
 				client.search({
@@ -122,14 +120,72 @@ describe("exa/client", () => {
 				}),
 			).rejects.toThrowError(/invalid JSON/);
 		});
+
+		it("tolerates costDollars as string and wrong-typed unread or optional fields", async () => {
+			globalThis.fetch = vi.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						requestId: "req_2",
+						costDollars: "0.0025",
+						results: [
+							{
+								title: "Hello",
+								url: "https://example.com",
+								image: 12345,
+								author: { name: "Alice" },
+								score: "0.9",
+							},
+						],
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
+
+			const client = createExaRestClient("test-key");
+
+			const out = await client.search({
+				query: "x",
+				effectiveParams: {
+					queries: ["x"],
+					numResults: 5,
+					searchType: "auto",
+					includeDomains: [],
+					excludeDomains: [],
+					highlightsMaxCharacters: 800,
+				},
+			});
+
+			expect(out.costDollars).toBeUndefined();
+			expect(out.results).toHaveLength(1);
+			expect(out.results[0].url).toBe("https://example.com");
+		});
+
+		it("includes validation detail in ProviderError on invalid Exa response shape", async () => {
+			globalThis.fetch = vi
+				.fn<typeof fetch>()
+				.mockResolvedValue(new Response(JSON.stringify({ results: "not-an-array" }), { status: 200 }));
+
+			const client = createExaRestClient("k");
+			await expect(
+				client.search({
+					query: "x",
+					effectiveParams: {
+						queries: ["x"],
+						numResults: 5,
+						searchType: "auto",
+						includeDomains: [],
+						excludeDomains: [],
+						highlightsMaxCharacters: 800,
+					},
+				}),
+			).rejects.toThrowError(/\/results/);
+		});
 	});
 
 	describe("normalizeExaResults", () => {
 		it("drops results without url", () => {
-			const out = normalizeExaResults([
-				{ title: "no url" } as ExaApiResult,
-				{ url: "https://x.com", title: "has url" },
-			]);
+			const out = normalizeExaResults([{ title: "no url" }, { url: "https://x.com", title: "has url" }]);
+
 			expect(out).toHaveLength(1);
 			expect(out[0].title).toBe("has url");
 		});
@@ -143,6 +199,7 @@ describe("exa/client", () => {
 			const out = normalizeExaResults([
 				{ url: "https://x.com", title: "  a  b  ", highlights: ["  h ", "h2", "h3", "h4"] },
 			]);
+
 			expect(out[0].title).toBe("a b");
 			expect(out[0].highlights).toEqual(["h", "h2", "h3"]);
 		});
@@ -161,6 +218,7 @@ describe("exa/client", () => {
 				},
 				0,
 			);
+
 			expect(text).toContain("1. T");
 			expect(text).toContain("https://x.com");
 			expect(text).toContain("published 2026-01-01");

@@ -1,7 +1,38 @@
+import { arr, compile, nullable, obj, opt, str, unknown } from "@earendil-works/pi-schema";
 import { ProviderError } from "../errors.js";
 import type { NormalizedExaResult } from "../types.js";
 
 const BRAVE_WEB_SEARCH = "https://api.search.brave.com/res/v1/web/search";
+
+const BraveResultSchema = obj(
+	{
+		title: opt(unknown()),
+		url: opt(unknown()),
+		description: opt(unknown()),
+		age: opt(unknown()),
+	},
+	{ open: true },
+);
+
+const BraveResponseSchema = obj(
+	{
+		web: opt(
+			nullable(
+				obj(
+					{
+						results: opt(nullable(arr(BraveResultSchema))),
+					},
+					{ open: true },
+				),
+			),
+		),
+	},
+	{ open: true },
+);
+
+const braveResponseValidator = compile(BraveResponseSchema);
+
+const stringValidator = compile(str());
 
 export async function braveWebSearch(
 	query: string,
@@ -28,24 +59,46 @@ export async function braveWebSearch(
 			{ provider: "brave", status: 401 },
 		);
 	}
+
 	if (response.status === 429) {
 		throw new ProviderError("Brave: rate limited", { provider: "brave", status: 429 });
 	}
+
 	if (!response.ok) {
 		throw new ProviderError(`Brave Search HTTP ${response.status}`, { provider: "brave", status: response.status });
 	}
 
-	const data = (await response.json()) as {
-		web?: { results?: Array<{ title?: string; url?: string; description?: string; age?: string }> };
-	};
+	let parsed: ReturnType<typeof braveResponseValidator.validate>;
 
-	const results = data.web?.results ?? [];
-	return results
-		.filter((r) => typeof r.url === "string" && r.url.length > 0)
-		.map((r) => ({
-			title: r.title ?? r.url ?? "Untitled",
-			url: r.url as string,
-			publishedDate: r.age,
-			highlights: r.description ? [r.description] : [],
-		}));
+	try {
+		parsed = braveResponseValidator.validate(await response.json());
+	} catch {
+		throw new ProviderError("Brave Search returned invalid JSON.", { provider: "brave" });
+	}
+
+	if (!parsed.ok) {
+		const first = parsed.errors[0];
+		const detail = first ? `${first.path || "/"}: ${first.message}` : "schema validation failed";
+		throw new ProviderError(`Brave Search returned invalid JSON (${detail}).`, { provider: "brave" });
+	}
+
+	const results = parsed.value.web?.results ?? [];
+	const normalized: NormalizedExaResult[] = [];
+
+	for (const r of results) {
+		if (!stringValidator.check(r.url) || !r.url) continue;
+
+		const title = stringValidator.check(r.title) ? r.title : r.url;
+		const description = stringValidator.check(r.description) && r.description ? [r.description] : [];
+		const age = stringValidator.check(r.age) ? r.age : undefined;
+
+		normalized.push({
+			title,
+			url: r.url,
+			publishedDate: age,
+			highlights: description,
+		});
+	}
+
+	return normalized;
 }

@@ -6,19 +6,19 @@
  * MCP tool (or equivalent) when falling back.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { arr, int, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
+import type { AgentToolUpdateCallback, ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { arr, compile, int, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import { resolveConfig } from "../config.js";
 import { buildErrorResult, toPiSearchError, ValidationError } from "../errors.js";
 import { createExaRestClient, formatExaResult, normalizeExaResults } from "../exa/client.js";
 import {
 	DEFAULT_HIGHLIGHTS_MAX_CHARACTERS,
 	DEFAULT_NUM_RESULTS,
+	ExaExecuteParamsSchema,
 	MAX_HIGHLIGHTS_MAX_CHARACTERS,
 	MAX_NUM_RESULTS,
 	MIN_HIGHLIGHTS_MAX_CHARACTERS,
 	normalizeExaParams,
-	type RawExaParams,
 } from "../exa/params.js";
 import type { NormalizedExaResult } from "../types.js";
 import { dedupeCitations, extractCitationsFromMcpText } from "./citations.js";
@@ -33,7 +33,33 @@ type ExaQueryRun = {
 
 const CODE_SEARCH_TYPES = ["auto", "neural", "instant"] as const;
 
-export function createCodesearchTool(_pi: ExtensionAPI) {
+const codesearchParameters = obj({
+	query: opt(str({ description: "Single search query." })),
+	queries: opt(arr(str(), { description: "Multiple queries searched sequentially." })),
+	numResults: opt(
+		int({
+			description: `Results per query (default ${DEFAULT_NUM_RESULTS}, max ${MAX_NUM_RESULTS}).`,
+			minimum: 1,
+			maximum: MAX_NUM_RESULTS,
+		}),
+	),
+	searchType: opt(
+		oneOf(CODE_SEARCH_TYPES, {
+			description: "Exa search mode (default auto).",
+		}),
+	),
+	highlightsMaxCharacters: opt(
+		int({
+			description: `Maximum characters for highlights (default ${DEFAULT_HIGHLIGHTS_MAX_CHARACTERS}, ${MIN_HIGHLIGHTS_MAX_CHARACTERS}-${MAX_HIGHLIGHTS_MAX_CHARACTERS}).`,
+			minimum: MIN_HIGHLIGHTS_MAX_CHARACTERS,
+			maximum: MAX_HIGHLIGHTS_MAX_CHARACTERS,
+		}),
+	),
+});
+
+const validateCodesearchParams = compile(ExaExecuteParamsSchema);
+
+export function createCodesearchTool(_pi: ExtensionAPI): ToolDefinition {
 	return {
 		name: "codesearch",
 		label: "⚙ codesearch",
@@ -43,42 +69,23 @@ export function createCodesearchTool(_pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use codesearch only for external code or library references, never for local repository search.",
 		],
-		parameters: obj({
-			query: opt(str({ description: "Single search query." })),
-			queries: opt(arr(str(), { description: "Multiple queries searched sequentially." })),
-			numResults: opt(
-				int({
-					description: `Results per query (default ${DEFAULT_NUM_RESULTS}, max ${MAX_NUM_RESULTS}).`,
-					minimum: 1,
-					maximum: MAX_NUM_RESULTS,
-				}),
-			),
-			searchType: opt(
-				oneOf(CODE_SEARCH_TYPES, {
-					description: "Exa search mode (default auto).",
-				}),
-			),
-			highlightsMaxCharacters: opt(
-				int({
-					description: `Maximum characters for highlights (default ${DEFAULT_HIGHLIGHTS_MAX_CHARACTERS}, ${MIN_HIGHLIGHTS_MAX_CHARACTERS}-${MAX_HIGHLIGHTS_MAX_CHARACTERS}).`,
-					minimum: MIN_HIGHLIGHTS_MAX_CHARACTERS,
-					maximum: MAX_HIGHLIGHTS_MAX_CHARACTERS,
-				}),
-			),
-		}),
-		async execute(
-			_id: string,
-			params: Record<string, unknown>,
-			signal: AbortSignal | undefined,
-			onUpdate:
-				| ((update: { content: Array<{ type: "text"; text: string }>; details?: Record<string, unknown> }) => void)
-				| undefined,
-		) {
+		parameters: codesearchParameters,
+		async execute(_id, params, signal, onUpdate) {
 			try {
 				const config = resolveConfig();
+
+				const parsed = validateCodesearchParams.validate(params);
+
+				if (!parsed.ok) {
+					const first = parsed.errors[0];
+					throw new ValidationError(
+						first ? `${first.path || "params"}: ${first.message}` : "Invalid codesearch parameters.",
+					);
+				}
+
 				const effectiveParams = normalizeExaParams({
-					...(params as RawExaParams),
-					searchType: ((params as RawExaParams).searchType ?? "neural") as RawExaParams["searchType"],
+					...parsed.value,
+					searchType: parsed.value.searchType ?? "neural",
 				});
 
 				if (config.disabledTools.has("codesearch")) {
@@ -90,6 +97,7 @@ export function createCodesearchTool(_pi: ExtensionAPI) {
 					: await runWithMcp(effectiveParams, signal, onUpdate, config.mcpTimeoutMs);
 
 				const text = renderOutput(queryRuns);
+
 				return {
 					content: [{ type: "text", text }],
 					details: {
@@ -111,12 +119,11 @@ async function runWithRest(
 	apiKey: string,
 	effectiveParams: ReturnType<typeof normalizeExaParams>,
 	signal: AbortSignal | undefined,
-	onUpdate:
-		| ((update: { content: Array<{ type: "text"; text: string }>; details?: Record<string, unknown> }) => void)
-		| undefined,
+	onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<ExaQueryRun[]> {
 	const client = createExaRestClient(apiKey);
 	const runs: ExaQueryRun[] = [];
+
 	for (const [index, query] of effectiveParams.queries.entries()) {
 		if (signal?.aborted) throw new ValidationError("Search aborted.");
 		onUpdate?.({
@@ -131,26 +138,27 @@ async function runWithRest(
 			results: normalizeExaResults(response.results),
 		});
 	}
+
 	return runs;
 }
 
 async function runWithMcp(
 	effectiveParams: ReturnType<typeof normalizeExaParams>,
 	signal: AbortSignal | undefined,
-	onUpdate:
-		| ((update: { content: Array<{ type: "text"; text: string }>; details?: Record<string, unknown> }) => void)
-		| undefined,
+	onUpdate: AgentToolUpdateCallback | undefined,
 	timeoutMs: number,
 ): Promise<ExaQueryRun[]> {
 	const { createDefaultMcpClient } = await import("../mcp/client.js");
 	const client = createDefaultMcpClient();
 	const names = await client.listToolNames("exa");
 	const toolName = pickCodesearchToolName(names);
+
 	if (!toolName) {
 		throw new ValidationError("Could not find a code_search Exa MCP tool. Set EXA_API_KEY to use direct REST.");
 	}
 
 	const runs: ExaQueryRun[] = [];
+
 	for (const [index, query] of effectiveParams.queries.entries()) {
 		if (signal?.aborted) throw new ValidationError("Search aborted.");
 		onUpdate?.({
@@ -182,29 +190,37 @@ async function runWithMcp(
 			})),
 		});
 	}
+
 	return runs;
 }
 
 function pickCodesearchToolName(names: string[]): string | null {
 	const candidates = ["get_code_context_exa", "code_search", "code_search_exa", "exa_code_search"];
+
 	for (const c of candidates) if (names.includes(c)) return c;
+
 	return names.find((n) => n.includes("code")) ?? null;
 }
 
 function renderOutput(runs: ExaQueryRun[]): string {
 	const sections: string[] = [];
+
 	for (const run of runs) {
 		sections.push(`Code results for: ${run.query}`);
+
 		if (run.results.length === 0) {
 			sections.push("No results.");
 			sections.push("");
 			continue;
 		}
+
 		sections.push(run.results.map((r, i) => formatExaResult(r, i)).join("\n"));
 		sections.push("");
 	}
+
 	sections.push(
 		"Suggested next step: use web_fetch on the most relevant URLs for full code examples and documentation.",
 	);
+
 	return sections.join("\n").trim();
 }

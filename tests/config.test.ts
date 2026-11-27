@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseConfig, resolveConfig, validateDisabledTools } from "../src/config.js";
 
 let tempDir: string;
+
 const ORIGINAL_ENV = { ...process.env };
 
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "pi-search-config-"));
+
 	for (const key of Object.keys(process.env)) delete process.env[key];
 	Object.assign(process.env, ORIGINAL_ENV);
 });
@@ -79,11 +81,13 @@ describe("config", () => {
 			const fileDir = join(tempDir, "u");
 			require("node:fs").mkdirSync(join(fileDir, ".pi"), { recursive: true });
 			writeFileSync(join(fileDir, ".pi", "pi-search.json"), JSON.stringify({ disabledTools: ["CONTEXT7"] }));
+
 			const config = resolveConfig({
 				env: process.env,
 				homeDir: fileDir,
 				disabledToolsFromArgs: ["deepwiki"],
 			});
+
 			expect([...config.disabledTools].sort()).toEqual(["codesearch", "context7", "deepwiki", "websearch"]);
 		});
 
@@ -129,6 +133,76 @@ describe("config", () => {
 			);
 			const config = resolveConfig({ env: process.env, homeDir: tempDir });
 			expect(config.ssrf.allowRanges).toEqual(["198.18.0.0/15"]);
+		});
+
+		it("tolerates null-valued fields in config file", () => {
+			delete process.env.EXA_API_KEY;
+			delete process.env.PARALLEL_API_KEY;
+			delete process.env.PI_SEARCH_PROVIDER;
+			const piDir = join(tempDir, ".pi");
+			mkdirSync(piDir, { recursive: true });
+			writeFileSync(
+				join(piDir, "pi-search.json"),
+				JSON.stringify({
+					exaApiKey: null,
+					parallelApiKey: null,
+					searchProvider: null,
+					braveApiKey: null,
+					firecrawlApiKey: null,
+					apiKey: null,
+					disabledTools: null,
+					useRestForExa: null,
+					mcpTimeoutMs: null,
+					ssrf: null,
+					githubToken: null,
+					urlRewrites: null,
+				}),
+			);
+
+			const config = resolveConfig({ env: process.env, homeDir: tempDir });
+			expect(config.exaApiKey).toBeUndefined();
+			expect(config.searchProvider).toBeUndefined();
+			expect(config.mcpTimeoutMs).toBe(30_000);
+			expect(config.useRestForExa).toBe(false);
+			expect(config.ssrf.allowRanges).toEqual([]);
+			expect(config.urlRewrites).toEqual([]);
+		});
+
+		it("skips partial or malformed entries in urlRewrites and ssrf.allowRanges", () => {
+			const piDir = join(tempDir, ".pi");
+			mkdirSync(piDir, { recursive: true });
+			writeFileSync(
+				join(piDir, "pi-search.json"),
+				JSON.stringify({
+					urlRewrites: [{ match: "a.example", replace: "b.example" }, { bad: true }, null, 42],
+					ssrf: { allowRanges: [123, null, "198.18.0.0/15", "not-a-cidr"] },
+				}),
+			);
+
+			const config = resolveConfig({ env: process.env, homeDir: tempDir });
+			expect(config.urlRewrites).toEqual([{ match: "a.example", replace: "b.example" }]);
+			expect(config.ssrf.allowRanges).toEqual(["198.18.0.0/15"]);
+		});
+
+		it("allows env PI_SEARCH_PROVIDER to override an invalid file searchProvider", () => {
+			const piDir = join(tempDir, ".pi");
+			mkdirSync(piDir, { recursive: true });
+			writeFileSync(join(piDir, "pi-search.json"), JSON.stringify({ searchProvider: 123 }));
+			process.env.PI_SEARCH_PROVIDER = "exa";
+
+			const config = resolveConfig({ env: process.env, homeDir: tempDir });
+			expect(config.searchProvider).toBe("exa");
+		});
+
+		it("throws when effective file searchProvider is a truthy non-string", () => {
+			const piDir = join(tempDir, ".pi");
+			mkdirSync(piDir, { recursive: true });
+			writeFileSync(join(piDir, "pi-search.json"), JSON.stringify({ searchProvider: 123 }));
+			delete process.env.PI_SEARCH_PROVIDER;
+
+			expect(() => resolveConfig({ env: process.env, homeDir: tempDir })).toThrow(
+				"searchProvider must be a string ('exa' or 'parallel').",
+			);
 		});
 	});
 

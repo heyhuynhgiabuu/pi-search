@@ -11,6 +11,7 @@ Snippet: world
 Title: World
 URL: https://example.org
 Snippet: again`;
+
 			const out = extractCitationsFromMcpText(text, "exa");
 			expect(out).toHaveLength(2);
 			expect(out[0]).toMatchObject({ title: "Hello", url: "https://example.com", source: "exa", index: 1 });
@@ -25,6 +26,7 @@ Snippet: again`;
 		it("extracts bare URLs in nearby lines", () => {
 			const text = `Title: Bare
 Check this https://bare.example.com for more`;
+
 			const out = extractCitationsFromMcpText(text, "exa");
 			expect(out).toHaveLength(1);
 			expect(out[0].url).toBe("https://bare.example.com");
@@ -38,6 +40,7 @@ Check this https://bare.example.com for more`;
 				{ index: 2, url: "https://a.com", title: "A2", source: "exa" },
 				{ index: 3, url: "https://b.com", title: "B", source: "exa" },
 			]);
+
 			expect(out.map((c) => c.url)).toEqual(["https://a.com", "https://b.com"]);
 			expect(out.map((c) => c.index)).toEqual([1, 2]);
 		});

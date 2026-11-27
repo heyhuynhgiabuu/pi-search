@@ -1,22 +1,25 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { arr, bool, int, obj, oneOf, opt, type Properties, str } from "@earendil-works/pi-schema";
+import { arr, bool, compile, int, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import { buildErrorResult, toPiSearchError, ValidationError } from "../errors.js";
 import {
 	DEFAULT_HIGHLIGHTS_MAX_CHARACTERS,
 	DEFAULT_NUM_RESULTS,
+	ExaExecuteParamsSchema,
 	MAX_HIGHLIGHTS_MAX_CHARACTERS,
 	MIN_HIGHLIGHTS_MAX_CHARACTERS,
 	normalizeExaParams,
-	type RawExaParams,
 } from "../exa/params.js";
 import { fetchSearchResultUrlsInBackground } from "../fetch/search-content.js";
 import { runWebsearchQueries } from "../search/run-websearch.js";
-import type { ExaQueryRun, ResolvedConfig } from "../types.js";
+import type { ExaQueryRun, ResolvedConfig, ToolDetails } from "../types.js";
 import { renderToolCall, renderWebsearchResult } from "./render.js";
+
+const validateWebsearchExecuteParams = compile(ExaExecuteParamsSchema);
 
 export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): ToolDefinition {
 	const canRetrieveStoredContent = !config.disabledTools.has("get_fetch_content");
-	const baseProperties: Properties = {
+
+	const baseProperties = {
 		query: opt(str({ description: "Single search query." })),
 		queries: opt(arr(str(), { description: "Multiple queries searched sequentially." })),
 		numResults: opt(
@@ -57,8 +60,9 @@ export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): T
 			}),
 		),
 	};
-	const properties: Properties = canRetrieveStoredContent
-		? {
+
+	const parameters = canRetrieveStoredContent
+		? obj({
 				...baseProperties,
 				includeContent: opt(
 					bool({
@@ -66,8 +70,8 @@ export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): T
 							"When true, fetches full page content for up to 5 result URLs in the background for get_fetch_content.",
 					}),
 				),
-			}
-		: baseProperties;
+			})
+		: obj(baseProperties);
 
 	return {
 		name: "websearch",
@@ -79,24 +83,35 @@ export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): T
 			"Use websearch only for external or current information; do not use it for greetings or local repository search.",
 			"Use web_fetch when the user provides or selects a specific URL.",
 		],
-		parameters: obj(properties),
+		parameters,
 		async execute(_id, params, signal, onUpdate) {
 			try {
 				if (signal?.aborted) {
 					throw new ValidationError("Search aborted.");
 				}
 
-				const effectiveParams = normalizeExaParams(params as RawExaParams);
+				const parsed = validateWebsearchExecuteParams.validate(params);
+
+				if (!parsed.ok) {
+					const first = parsed.errors[0];
+					throw new ValidationError(
+						first ? `${first.path || "params"}: ${first.message}` : "Invalid websearch parameters.",
+					);
+				}
+
+				const effectiveParams = normalizeExaParams(parsed.value);
 
 				if (config.disabledTools.has("websearch")) {
 					throw new ValidationError("websearch is disabled in config.");
 				}
 
 				const onProgress = onUpdate
-					? (update: { content: Array<{ type: "text"; text: string }>; details?: Record<string, unknown> }) =>
-							onUpdate({ content: update.content, details: update.details ?? {} })
+					? (update: { content: Array<{ type: "text"; text: string }>; details: ToolDetails }) =>
+							onUpdate({ content: update.content, details: update.details })
 					: undefined;
+
 				const { runs, provider } = await runWebsearchQueries(config, effectiveParams, signal, onProgress);
+
 				const queryRuns: ExaQueryRun[] = runs.map(({ query, requestId, costDollars, results }) => ({
 					query,
 					requestId,
@@ -105,6 +120,7 @@ export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): T
 				}));
 
 				const urls: string[] = [];
+
 				for (const run of queryRuns) {
 					for (const r of run.results) {
 						if (r.url && !urls.includes(r.url)) urls.push(r.url);
@@ -113,6 +129,7 @@ export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): T
 
 				const includeContent = canRetrieveStoredContent && effectiveParams.includeContent;
 				let includeContentNote = "";
+
 				if (includeContent && urls.length > 0) {
 					const slice = urls.slice(0, 5);
 					void fetchSearchResultUrlsInBackground(pi, config, slice, signal).catch(() => {});
@@ -120,6 +137,7 @@ export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): T
 				}
 
 				const text = `${renderOutput(queryRuns)}${includeContentNote}`.trim();
+
 				return {
 					content: [{ type: "text", text }],
 					details: {
@@ -136,26 +154,32 @@ export function createWebsearchTool(pi: ExtensionAPI, config: ResolvedConfig): T
 			}
 		},
 		renderCall: renderToolCall("websearch"),
-		renderResult: renderWebsearchResult as never,
+		renderResult: renderWebsearchResult,
 	};
 }
 
 function renderOutput(runs: ExaQueryRun[]): string {
 	const sections: string[] = [];
+
 	for (const run of runs) {
 		sections.push(`## Query: ${run.query}`);
+
 		if (run.results.length === 0) {
 			sections.push("No results.");
 			continue;
 		}
+
 		for (const [i, r] of run.results.entries()) {
 			const highlight = r.highlights[0] ?? r.summary ?? r.text ?? "";
 			sections.push(`${i + 1}. **${r.title}**`);
 			sections.push(`   ${r.url}`);
+
 			if (r.publishedDate) sections.push(`   Published: ${r.publishedDate}`);
+
 			if (highlight) sections.push(`   ${highlight}`);
 			sections.push("");
 		}
 	}
+
 	return sections.join("\n").trim();
 }

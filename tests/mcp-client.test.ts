@@ -20,6 +20,7 @@ describe("mcp/client", () => {
 data: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}
 
 `;
+
 			const out = parseMcpMessages(sse, "text/event-stream");
 			expect(out).toEqual([{ jsonrpc: "2.0", id: 1, result: { ok: true } }]);
 		});
@@ -27,6 +28,7 @@ data: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}
 		it("skips invalid JSON lines", () => {
 			const sse = `data: not-json
 data: {"ok":true}`;
+
 			const out = parseMcpMessages(sse, "text/event-stream");
 			expect(out).toEqual([{ ok: true }]);
 		});
@@ -39,6 +41,7 @@ data: {"ok":true}`;
 				{ type: "text", text: "b" },
 				{ type: "image", data: "..." },
 			]);
+
 			expect(out).toBe("a\nb");
 		});
 		it("returns '' for non-array content", () => {
@@ -49,37 +52,39 @@ data: {"ok":true}`;
 
 	describe("JsonRpcHttpMcpClient", () => {
 		it("invokes a tool and returns normalized content", async () => {
-			globalThis.fetch = vi.fn().mockResolvedValue(
-				new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "hi" }] } }), {
-					status: 200,
-					headers: { "content-type": "application/json" },
-				}),
-			) as unknown as typeof fetch;
+			globalThis.fetch = vi.fn<typeof fetch>(() =>
+				Promise.resolve(
+					new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "hi" }] } }), {
+						status: 200,
+						headers: { "content-type": "application/json" },
+					}),
+				),
+			);
 
 			const client = createDefaultMcpClient();
+
 			const out = await client.invoke({
 				server: "exa",
 				toolName: "web_search_exa",
 				arguments: { query: "x" },
 			});
+
 			expect(out.content).toEqual([{ type: "text", text: "hi" }]);
 		});
 
 		it("throws McpError on HTTP errors", async () => {
-			globalThis.fetch = vi
-				.fn()
-				.mockResolvedValue(new Response("server error", { status: 503 })) as unknown as typeof fetch;
+			globalThis.fetch = vi.fn<typeof fetch>(() => Promise.resolve(new Response("server error", { status: 503 })));
 			const client = createDefaultMcpClient();
 			await expect(client.invoke({ server: "exa", toolName: "x", arguments: {} })).rejects.toThrowError(McpError);
 		});
 
 		it("times out via AbortController", async () => {
-			globalThis.fetch = vi.fn().mockImplementation(
-				(_url: string, init?: RequestInit) =>
+			globalThis.fetch = vi.fn<typeof fetch>(
+				(_url, init) =>
 					new Promise((_resolve, reject) => {
 						init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
 					}),
-			) as unknown as typeof fetch;
+			);
 			const client = createDefaultMcpClient();
 			await expect(
 				client.invoke({ server: "exa", toolName: "x", arguments: {}, options: { timeoutMs: 10 } }),

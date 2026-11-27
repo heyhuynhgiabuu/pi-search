@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { describe, expect, it } from "vitest";
 import {
 	COLLAPSED_PREVIEW_CHARS,
 	DEFAULT_PAGE_CHARS,
@@ -8,19 +9,17 @@ import {
 	renderToolCall,
 	renderWebFetchResult,
 	renderWebsearchResult,
-	type Theme,
 	toMarkdownTheme,
 } from "../src/tools/render.js";
 
-vi.mock("@earendil-works/pi-coding-agent", () => ({
-	keyText: vi.fn(() => "ctrl+o"),
-}));
-
 /** Minimal Theme for testing — wraps with ANSI codes. */
-const makeTheme = (): Theme => ({
-	fg: (color, text) => `<${color}>${text}</${color}>`,
-	bg: (color, text) => `[bg:${color}]${text}[/bg]`,
-});
+const makeTheme = (): Theme => {
+	// SAFETY: Test stub implementing only Theme's fg/bg methods used by render helpers.
+	return {
+		fg: (color, text) => `<${color}>${text}</${color}>`,
+		bg: (color, text) => `[bg:${color}]${text}[/bg]`,
+	} as Theme;
+};
 
 const baseResult = (text: string) => ({
 	content: [{ type: "text" as const, text }],
@@ -32,6 +31,7 @@ describe("render", () => {
 		expect(renderToolCall("websearch")(undefined, makeTheme()).render(80)[0]?.trimEnd()).toBe(
 			"<toolTitle>⚙ websearch</toolTitle>",
 		);
+		expect(renderToolCall("foo")({ a: 1 }, makeTheme()).render(80)[0]?.trimEnd()).toBe("<toolTitle>⚙ foo</toolTitle>");
 	});
 
 	describe("toMarkdownTheme", () => {
@@ -71,14 +71,14 @@ describe("render", () => {
 		it("truncates when collapsed and wraps hint in dim styling", () => {
 			const text = "x".repeat(COLLAPSED_PREVIEW_CHARS + 100);
 			const theme = makeTheme();
-			const r = paginateText(text, false, theme);
+			const r = paginateText(text, false, theme, DEFAULT_PAGE_CHARS, () => "ctrl+o");
 			expect(r.page.length).toBeLessThan(text.length);
 			expect(r.page).toContain(theme.fg("dim", "(ctrl+o to expand/collapse)"));
 		});
 
 		it("appends dim-styled expand hint to short text when collapsed", () => {
 			const theme = makeTheme();
-			const r = paginateText("short", false, theme);
+			const r = paginateText("short", false, theme, DEFAULT_PAGE_CHARS, () => "ctrl+o");
 			expect(r.page).toBe(`short ${theme.fg("dim", "(ctrl+o to expand/collapse)")}`);
 		});
 
@@ -94,21 +94,24 @@ describe("render", () => {
 		it("renders a Box-wrapped Markdown for collapsed and expanded", () => {
 			const theme = makeTheme();
 			const result = baseResult("Title: Hello\nURL: https://example.com\nSnippet: world");
-			const collapsed = renderWebsearchResult(result, { expanded: false, isPartial: false }, theme, {});
-			const expanded = renderWebsearchResult(result, { expanded: true, isPartial: false }, theme, {});
+			const collapsed = renderWebsearchResult(result, { expanded: false, isPartial: false }, theme);
+			const expanded = renderWebsearchResult(result, { expanded: true, isPartial: false }, theme);
 			expect(collapsed).not.toBeNull();
 			expect(expanded).not.toBeNull();
 			expect(collapsed?.constructor?.name).toBe("Box");
+			expect(collapsed.render(120).join("\n")).toContain("to expand/collapse)");
 		});
 
 		it("includes a Sources footer when expanded and citations are present", () => {
 			const theme = makeTheme();
+
 			const text = `Title: Hello
 URL: https://example.com
 Snippet: world`;
+
 			const result = baseResult(text);
 			// Just verify it doesn't throw and returns a component
-			const out = renderWebsearchResult(result, { expanded: true, isPartial: false }, theme, {});
+			const out = renderWebsearchResult(result, { expanded: true, isPartial: false }, theme);
 			expect(out).not.toBeNull();
 		});
 	});
@@ -117,13 +120,13 @@ Snippet: world`;
 		it("extracts the title from the result text", () => {
 			const theme = makeTheme();
 			const text = `## React Hooks\n\nuseState is...`;
-			const out = renderContext7Result(baseResult(text), { expanded: true, isPartial: false }, theme, {});
+			const out = renderContext7Result(baseResult(text), { expanded: true, isPartial: false }, theme);
 			expect(out).not.toBeNull();
 		});
 
 		it("falls back to a default title when none is present", () => {
 			const theme = makeTheme();
-			const out = renderContext7Result(baseResult("no heading here"), { expanded: false, isPartial: false }, theme, {});
+			const out = renderContext7Result(baseResult("no heading here"), { expanded: false, isPartial: false }, theme);
 			expect(out).not.toBeNull();
 		});
 	});
@@ -131,18 +134,19 @@ Snippet: world`;
 	describe("renderDeepwikiResult", () => {
 		it("prepends the repo tag when present in details", () => {
 			const theme = makeTheme();
+
 			const out = renderDeepwikiResult(
 				{ ...baseResult("Some answer text"), details: { repo: "facebook/react" } },
 				{ expanded: false, isPartial: false },
 				theme,
-				{},
 			);
+
 			expect(out).not.toBeNull();
 		});
 
 		it("renders without a header when repo is missing", () => {
 			const theme = makeTheme();
-			const out = renderDeepwikiResult(baseResult("answer"), { expanded: false, isPartial: false }, theme, {});
+			const out = renderDeepwikiResult(baseResult("answer"), { expanded: false, isPartial: false }, theme);
 			expect(out).not.toBeNull();
 		});
 	});
@@ -150,12 +154,13 @@ Snippet: world`;
 	describe("renderWebFetchResult", () => {
 		it("prepends the URL when present in details", () => {
 			const theme = makeTheme();
+
 			const out = renderWebFetchResult(
 				{ ...baseResult("body"), details: { url: "https://example.com" } },
 				{ expanded: false, isPartial: false },
 				theme,
-				{},
 			);
+
 			expect(out).not.toBeNull();
 		});
 	});

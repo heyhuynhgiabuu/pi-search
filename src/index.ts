@@ -16,7 +16,7 @@
  * Unknown tool names in disabledTools are rejected via ConfigError.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionStartEvent, SessionTreeEvent } from "@earendil-works/pi-coding-agent";
 import { resolveConfig, validateDisabledTools } from "./config.js";
 import { type FetchSessionRestoreContext, restoreFetchContentFromSession } from "./fetch/content-store.js";
 import { createCodesearchTool } from "./tools/codesearch.js";
@@ -38,6 +38,7 @@ export const TOOL_NAMES = [
 	"firecrawl_scrape",
 	"firecrawl_crawl",
 ] as const;
+
 export type ToolName = (typeof TOOL_NAMES)[number];
 
 export default function piSearchExtension(pi: ExtensionAPI): void {
@@ -46,26 +47,40 @@ export default function piSearchExtension(pi: ExtensionAPI): void {
 
 	const enabled = (name: ToolName): boolean => !config.disabledTools.has(name);
 
-	if (enabled("websearch")) pi.registerTool(createWebsearchTool(pi, config) as never);
-	if (enabled("codesearch")) pi.registerTool(createCodesearchTool(pi) as never);
-	if (enabled("context7")) pi.registerTool(createContext7Tool(pi) as never);
-	if (enabled("deepwiki")) pi.registerTool(createDeepwikiTool(pi) as never);
-	if (enabled("web_fetch")) pi.registerTool(createWebFetchTool(pi, config) as never);
-	if (enabled("get_fetch_content")) pi.registerTool(createGetFetchContentTool() as never);
-	if (enabled("firecrawl_scrape")) pi.registerTool(createFirecrawlScrapeTool(pi, config) as never);
-	if (enabled("firecrawl_crawl")) pi.registerTool(createFirecrawlCrawlTool(pi, config) as never);
+	if (enabled("websearch")) pi.registerTool(createWebsearchTool(pi, config));
 
-	const hydrateFetchStore = async (_event: unknown, ctx: FetchSessionRestoreContext) => {
+	if (enabled("codesearch")) pi.registerTool(createCodesearchTool(pi));
+
+	if (enabled("context7")) pi.registerTool(createContext7Tool(pi));
+
+	if (enabled("deepwiki")) pi.registerTool(createDeepwikiTool(pi));
+
+	if (enabled("web_fetch")) pi.registerTool(createWebFetchTool(pi, config));
+
+	if (enabled("get_fetch_content")) pi.registerTool(createGetFetchContentTool());
+
+	if (enabled("firecrawl_scrape")) pi.registerTool(createFirecrawlScrapeTool(pi, config));
+
+	if (enabled("firecrawl_crawl")) pi.registerTool(createFirecrawlCrawlTool(pi, config));
+
+	const hydrateFetchStore = async (_event: SessionStartEvent | SessionTreeEvent, ctx: FetchSessionRestoreContext) => {
 		restoreFetchContentFromSession(ctx);
 	};
+
 	pi.on("session_start", hydrateFetchStore);
 	pi.on("session_tree", hydrateFetchStore);
 }
 
 export { resolveConfig, validateDisabledTools } from "./config.js";
+
 export * from "./errors.js";
+
 export { createExaRestClient, formatExaResult, normalizeExaResults } from "./exa/client.js";
+
 export { normalizeExaParams } from "./exa/params.js";
-export { createDefaultMcpClient, type McpClient } from "./mcp/client.js";
+
+export { createDefaultMcpClient, type McpClient, type McpToolArguments } from "./mcp/client.js";
+
 export { dedupeCitations, extractCitationsFromMcpText, formatCitationFooter } from "./tools/citations.js";
+
 export * from "./types.js";

@@ -9,6 +9,7 @@
 ### Patch Changes
 
 - 9215ca9: Migrate tool parameter schemas from `typebox` to `@earendil-works/pi-schema` and drop the `typebox` dependency.
+- Parse external payloads (Exa, Brave, Parallel, Firecrawl, GitHub, MCP, Context7, config file) at the I/O boundary with `pi-schema` validators and clear all `oxlint` anti-slop warnings, with no intended behavior change. Exports `McpToolArguments`; `renderToolCall` now defaults its args generic to `unknown`.
 
 ## 0.3.3
 

@@ -21,6 +21,7 @@ export type ResolvedFetch = {
 };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
 const DEFAULT_MAX_CHARS = 50_000;
 
 function ssrfPolicyFromConfig(config: ResolvedConfig): SsrfPolicy {
@@ -48,19 +49,26 @@ async function fetchHttpResponse(
 			signal,
 			redirect: "follow",
 		});
+
 		const contentType = response.headers.get("content-type");
 		const asPdf = (contentType ?? "").includes("application/pdf") || urlLooksLikePdf(url.toString());
+
 		if (asPdf) {
 			const bodyBytes = await response.arrayBuffer();
+
 			return { bodyText: null, bodyBytes, contentType, status: response.status };
 		}
+
 		const bodyText = await response.text();
+
 		return { bodyText, bodyBytes: null, contentType, status: response.status };
 	} catch (err) {
 		if (err instanceof FetchError) throw err;
+
 		if (err instanceof Error && err.name === "AbortError") {
 			throw fetchError("fetch_timeout", "Request timed out", { url: url.toString() });
 		}
+
 		const message = err instanceof Error ? err.message : String(err);
 		throw fetchError("fetch_error", message, { url: url.toString() });
 	} finally {
@@ -68,8 +76,9 @@ async function fetchHttpResponse(
 	}
 }
 
-function truncateText(text: string, maxChars: number): { text: string; truncated: boolean } {
+function truncateText(text: string, maxChars: number) {
 	if (text.length <= maxChars) return { text, truncated: false };
+
 	return { text: `${text.slice(0, maxChars)}\n\n[truncated at ${maxChars} chars]`, truncated: true };
 }
 
@@ -80,11 +89,13 @@ export async function resolveUrlContent(
 ): Promise<ResolvedFetch> {
 	const rewritten = applyUrlRewrites(urlString, config.urlRewrites);
 	let parsedUrl: URL;
+
 	try {
 		parsedUrl = new URL(rewritten);
 	} catch {
 		throw fetchError("fetch_error", "Invalid URL", { url: urlString });
 	}
+
 	if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
 		throw fetchError("fetch_error", "Only http and https URLs are supported", { url: urlString });
 	}
@@ -96,14 +107,18 @@ export async function resolveUrlContent(
 	const maxChars = options.maxOutputChars ?? DEFAULT_MAX_CHARS;
 
 	const gh = parseGitHubUrl(parsedUrl);
+
 	if (gh) {
 		const ghAuth = await resolveGithubToken(config.githubToken);
+
 		const { text, title } = await fetchGitHubContent(gh, {
 			signal: options.signal,
 			timeoutMs,
 			githubToken: ghAuth.token ?? undefined,
 		});
+
 		const { text: out, truncated } = truncateText(text, maxChars);
+
 		return {
 			url: urlString,
 			title,
@@ -116,10 +131,13 @@ export async function resolveUrlContent(
 	}
 
 	const llmsCandidates = llmsTxtCandidateUrls(parsedUrl);
+
 	if (llmsCandidates.length > 0) {
 		const llms = await fetchFirstLlmsTxt(llmsCandidates, { signal: options.signal, timeoutMs });
+
 		if (llms) {
 			const { text: out, truncated } = truncateText(llms.text, maxChars);
+
 			return {
 				url: urlString,
 				title: "llms.txt",
@@ -140,6 +158,7 @@ export async function resolveUrlContent(
 	if (bodyBytes) {
 		const { text, totalPages } = await extractPdfTextFromBytes(bodyBytes, { url: urlString });
 		const { text: out, truncated } = truncateText(text, maxChars);
+
 		return {
 			url: urlString,
 			title: `PDF (${totalPages} pages)`,
@@ -152,6 +171,7 @@ export async function resolveUrlContent(
 	}
 
 	const body = bodyText ?? "";
+
 	if (!body.trim()) {
 		throw fetchError("fetch_error", "Empty response body", { url: urlString, status });
 	}
@@ -182,6 +202,7 @@ export async function resolveUrlContent(
 	}
 
 	const { text: out, truncated } = truncateText(text, maxChars);
+
 	return {
 		url: urlString,
 		title,

@@ -41,42 +41,67 @@ export type ErrorCode =
 	| "internal_error"
 	| "aborted";
 
+export type ErrorDetailPrimitive = string | number | boolean | null | undefined;
+
+export type ErrorDetailValue =
+	| ErrorDetailPrimitive
+	| readonly ErrorDetailValue[]
+	| { readonly [key: string]: ErrorDetailValue };
+
+export type ErrorDetails = Record<string, ErrorDetailValue>;
+
+export type SerializedPiSearchError = {
+	code: ErrorCode;
+	message: string;
+	details?: ErrorDetails;
+};
+
+export type ErrorResultEnvelope = {
+	content: Array<{ type: "text"; text: string }>;
+	details: { error: SerializedPiSearchError };
+};
+
 export class PiSearchError extends Error {
 	readonly code: ErrorCode;
-	readonly details?: Record<string, unknown>;
+	readonly details?: ErrorDetails;
 
-	constructor(code: ErrorCode, message: string, details?: Record<string, unknown>) {
+	constructor(code: ErrorCode, message: string, details?: ErrorDetails) {
 		super(message);
 		this.name = "PiSearchError";
 		this.code = code;
 		this.details = details;
 	}
 
-	toJSON(): { code: ErrorCode; message: string; details?: Record<string, unknown> } {
-		return {
+	toJSON(): SerializedPiSearchError {
+		const serialized: SerializedPiSearchError = {
 			code: this.code,
 			message: this.message,
-			...(this.details ? { details: this.details } : {}),
 		};
+
+		if (this.details) {
+			serialized.details = this.details;
+		}
+
+		return serialized;
 	}
 }
 
 export class ValidationError extends PiSearchError {
-	constructor(message: string, details?: Record<string, unknown>) {
+	constructor(message: string, details?: ErrorDetails) {
 		super("validation_error", message, details);
 		this.name = "ValidationError";
 	}
 }
 
 export class ConfigError extends PiSearchError {
-	constructor(message: string, details?: Record<string, unknown>) {
+	constructor(message: string, details?: ErrorDetails) {
 		super("config_error", message, details);
 		this.name = "ConfigError";
 	}
 }
 
 export class ProviderError extends PiSearchError {
-	constructor(message: string, details?: Record<string, unknown>) {
+	constructor(message: string, details?: ErrorDetails) {
 		super("provider_error", message, details);
 		this.name = "ProviderError";
 	}
@@ -86,7 +111,7 @@ export class McpError extends PiSearchError {
 	constructor(
 		code: Extract<ErrorCode, "mcp_error" | "mcp_timeout" | "mcp_unavailable">,
 		message: string,
-		details?: Record<string, unknown>,
+		details?: ErrorDetails,
 	) {
 		super(code, message, details);
 		this.name = "McpError";
@@ -97,7 +122,7 @@ export class FetchError extends PiSearchError {
 	constructor(
 		code: Extract<ErrorCode, "fetch_error" | "fetch_blocked" | "fetch_timeout">,
 		message: string,
-		details?: Record<string, unknown>,
+		details?: ErrorDetails,
 	) {
 		super(code, message, details);
 		this.name = "FetchError";
@@ -108,26 +133,26 @@ export class FetchError extends PiSearchError {
  * Map raw error → PiSearchError with a stable code.
  * Used as the last line of defense in tool execute() handlers.
  */
-export function toPiSearchError(error: unknown): PiSearchError {
-	if (error instanceof PiSearchError) return error;
-	if (error instanceof Error) {
+export function toPiSearchError(cause: unknown): PiSearchError {
+	if (cause instanceof PiSearchError) return cause;
+
+	if (cause instanceof Error) {
 		// Recognize common fetch/Abort shapes
-		if (error.name === "AbortError") {
-			return new PiSearchError("aborted", error.message);
+		if (cause.name === "AbortError") {
+			return new PiSearchError("aborted", cause.message);
 		}
-		return new PiSearchError("internal_error", error.message, { originalName: error.name });
+
+		return new PiSearchError("internal_error", cause.message, { originalName: cause.name });
 	}
-	return new PiSearchError("internal_error", String(error));
+
+	return new PiSearchError("internal_error", String(cause));
 }
 
 /**
  * Build the standard error result envelope.
  * Mirrors pi-exa-search's `buildErrorResult` for consistency.
  */
-export function buildErrorResult(error: PiSearchError): {
-	content: Array<{ type: "text"; text: string }>;
-	details: { error: ReturnType<PiSearchError["toJSON"]> };
-} {
+export function buildErrorResult(error: PiSearchError): ErrorResultEnvelope {
 	return {
 		content: [{ type: "text", text: `Error: ${error.message}` }],
 		details: { error: error.toJSON() },

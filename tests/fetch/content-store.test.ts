@@ -33,6 +33,7 @@ describe("content-store", () => {
 			text: "body",
 			extraction: "direct",
 		});
+
 		expect(getFetchContent(id)?.text).toBe("body");
 	});
 
@@ -42,12 +43,14 @@ describe("content-store", () => {
 
 	it("restores from session branch custom entries", () => {
 		clearFetchContentStore();
+
 		const { record } = putFetchContent({
 			url: "https://saved.com",
 			title: null,
 			text: "persisted",
 			extraction: "readability",
 		});
+
 		clearFetchContentStore();
 
 		const count = restoreFetchContentFromSession({
@@ -58,6 +61,7 @@ describe("content-store", () => {
 				],
 			},
 		});
+
 		expect(count).toBe(1);
 		expect(getFetchContent(record.id)?.text).toBe("persisted");
 	});
@@ -71,6 +75,7 @@ describe("content-store", () => {
 			extraction: "direct",
 			createdAt: Date.now() - 2 * 60 * 60 * 1000,
 		};
+
 		expect(isValidStoredFetchPayload(stale)).toBe(true);
 		restoreFetchContentFromSession(
 			{

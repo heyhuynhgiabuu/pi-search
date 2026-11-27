@@ -1,28 +1,48 @@
-export type UrlRewriteRule = {
-	match: string;
-	replace: string;
-};
+import { compile, obj, type Static, str } from "@earendil-works/pi-schema";
+
+export const UrlRewriteRuleSchema = obj(
+	{
+		match: str(),
+		replace: str(),
+	},
+	{ open: true },
+);
+
+export type UrlRewriteRule = Static<typeof UrlRewriteRuleSchema>;
+
+export type UrlRewriteJsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| readonly UrlRewriteJsonValue[]
+	| { readonly [key: string]: UrlRewriteJsonValue };
+
+const urlRewriteRuleValidator = compile(UrlRewriteRuleSchema);
 
 export function applyUrlRewrites(urlString: string, rules: UrlRewriteRule[]): string {
 	if (rules.length === 0) return urlString;
 	let out = urlString;
+
 	for (const rule of rules) {
 		if (!rule.match) continue;
 		out = out.split(rule.match).join(rule.replace);
 	}
+
 	return out;
 }
 
-export function parseUrlRewriteRules(raw: unknown): UrlRewriteRule[] {
+export function parseUrlRewriteRules(raw?: UrlRewriteJsonValue): UrlRewriteRule[] {
 	if (!Array.isArray(raw)) return [];
 	const out: UrlRewriteRule[] = [];
+
 	for (const item of raw) {
-		if (!item || typeof item !== "object") continue;
-		const r = item as Record<string, unknown>;
-		if (typeof r.match !== "string" || typeof r.replace !== "string") continue;
-		const match = r.match.trim();
+		if (!urlRewriteRuleValidator.check(item)) continue;
+		const match = item.match.trim();
+
 		if (!match) continue;
-		out.push({ match, replace: r.replace });
+		out.push({ match, replace: item.replace });
 	}
+
 	return out;
 }

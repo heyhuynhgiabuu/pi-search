@@ -1,9 +1,13 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFirecrawlScrapeTool } from "../../src/tools/firecrawl-scrape.js";
 import type { ResolvedConfig } from "../../src/types.js";
 
-function mockPi() {
-	return { appendEntry: vi.fn() } as unknown as Parameters<typeof createFirecrawlScrapeTool>[0];
+function mockPi(): ExtensionAPI {
+	const partial: Partial<ExtensionAPI> = { appendEntry: vi.fn() };
+
+	// SAFETY: These tests only exercise `pi.appendEntry`; no other `ExtensionAPI` members are accessed.
+	return partial as ExtensionAPI;
 }
 
 function mockConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
@@ -114,6 +118,7 @@ describe("firecrawl_scrape tool", () => {
 			headers: new Map(),
 			json: () => Promise.resolve({ success: true, data: { markdown: "content" } }),
 		});
+
 		vi.stubGlobal("fetch", fetchMock);
 
 		await tool.execute("call-1", { url: "https://example.com" }, new AbortController().signal);
@@ -129,6 +134,7 @@ describe("firecrawl_scrape tool", () => {
 			headers: new Map(),
 			json: () => Promise.resolve({ success: true, data: { markdown: "content" } }),
 		});
+
 		vi.stubGlobal("fetch", fetchMock);
 
 		await tool.execute("call-1", { url: "https://example.com" }, new AbortController().signal);
@@ -169,6 +175,7 @@ describe("firecrawl_scrape tool", () => {
 				if (opts?.signal?.aborted) {
 					throw new DOMException("The operation was aborted", "AbortError");
 				}
+
 				return {
 					ok: true,
 					status: 200,
@@ -190,6 +197,7 @@ describe("firecrawl_scrape tool", () => {
 				if (opts?.signal?.aborted) {
 					throw new DOMException("The operation was aborted", "AbortError");
 				}
+
 				await new Promise<void>((_resolve, reject) => {
 					opts?.signal?.addEventListener("abort", () => {
 						reject(new DOMException("The operation was aborted", "AbortError"));
@@ -203,5 +211,27 @@ describe("firecrawl_scrape tool", () => {
 
 		const result = await promise;
 		expect(result.details?.error?.code).toBe("aborted");
+	});
+
+	it("accepts out-of-bound timeout, null optionals, and extra keys in execute()", async () => {
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: new Map(),
+			json: () => Promise.resolve({ success: true, data: { markdown: "content" } }),
+		});
+
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await tool.execute(
+			"call-1",
+			{ url: "https://example.com", onlyMainContent: null, timeout: 500, extraKey: "ignored" },
+			new AbortController().signal,
+		);
+
+		expect(result.details?.scrapeMethod).toBe("firecrawl");
+		const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(calledBody.onlyMainContent).toBe(true);
+		expect(calledBody.timeout).toBe(500);
 	});
 });

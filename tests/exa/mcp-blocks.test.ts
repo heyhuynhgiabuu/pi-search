@@ -12,6 +12,7 @@ A short highlight line.
 Title: Two
 URL: https://two.test
 Second snippet here.`;
+
 		const results = parseExaMcpTextToResults(raw, 5);
 		expect(results).toHaveLength(2);
 		expect(results[0]?.url).toBe("https://example.com");

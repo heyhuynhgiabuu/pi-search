@@ -15,13 +15,16 @@ describe("extractPdfTextFromBytes", () => {
 
 	it("parses minimal PDF or reports no text", async () => {
 		const buf = Buffer.from(MINIMAL_PDF_BASE64, "base64");
+
 		try {
 			const result = await extractPdfTextFromBytes(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), {
 				url: "https://example.com/t.pdf",
 			});
+
 			expect(result.totalPages).toBeGreaterThanOrEqual(1);
 		} catch (err) {
-			expect((err as { message?: string }).message).toMatch(/no extractable text/i);
+			if (!(err instanceof Error)) throw err;
+			expect(err.message).toMatch(/no extractable text/i);
 		}
 	});
 });

@@ -1,18 +1,25 @@
-import { keyText, type Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, type Theme, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Box, Markdown, Text } from "@earendil-works/pi-tui";
 
 /** Theme color for tool result panel background (matches pi-pretty `toolSuccess`). */
 const TOOL_RESULT_BG: Parameters<Theme["bg"]>[0] = "toolSuccessBg";
 
-export function renderToolCall(toolName: string): (_args: unknown, theme: Theme) => Text {
+export type RenderResultContext = Parameters<NonNullable<ToolDefinition["renderResult"]>>[3];
+
+export function renderToolCall<TArgs = unknown>(toolName: string): (_args: TArgs, theme: Theme) => Text {
 	return (_args, theme) => new Text(theme.fg("toolTitle", `⚙ ${toolName}`), 0, 0);
 }
 
-function expandToolHint(theme: Theme): string {
-	return theme.fg("dim", `(${keyText("app.tools.expand") ?? "ctrl+o"} to expand/collapse)`);
+const defaultExpandKeyText = (): string => keyText("app.tools.expand") ?? "ctrl+o";
+
+function expandToolHint(theme: Theme, getExpandKey: () => string = defaultExpandKeyText): string {
+	return theme.fg("dim", `(${getExpandKey()} to expand/collapse)`);
 }
+
 const ESC_RE = "\u001b";
+
 const ANSI_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([0-9;]*)m`, "g");
+
 const RESET_WITHOUT_BG = "\x1b[22;23;24;25;27;28;29;39m";
 
 /** Collapsed preview length (chars). */
@@ -75,26 +82,31 @@ export function paginateText(
 	expanded: boolean,
 	theme: Theme,
 	pageChars = DEFAULT_PAGE_CHARS,
+	getExpandKey: () => string = defaultExpandKeyText,
 ): PaginatedText {
 	const totalChars = text.length;
+
 	if (!text) return { page: "", totalChars: 0, totalPages: 0 };
 
 	if (!expanded) {
+		const hint = expandToolHint(theme, getExpandKey);
+
 		const preview =
-			text.length > COLLAPSED_PREVIEW_CHARS
-				? `${text.slice(0, COLLAPSED_PREVIEW_CHARS)}… ${expandToolHint(theme)}`
-				: `${text} ${expandToolHint(theme)}`;
+			text.length > COLLAPSED_PREVIEW_CHARS ? `${text.slice(0, COLLAPSED_PREVIEW_CHARS)}… ${hint}` : `${text} ${hint}`;
+
 		return { page: preview, totalChars, totalPages: 1 };
 	}
 
 	const totalPages = Math.max(1, Math.ceil(totalChars / pageChars));
 	const page = text.slice(0, pageChars);
 	const footer = totalPages > 1 ? `\n\n---\n[page 1/${totalPages} — ${totalChars.toLocaleString()} chars total]` : "";
+
 	return { page: page + footer, totalChars, totalPages };
 }
 
 function firstText(result: { content?: Array<{ type?: string; text?: string }> }): string {
 	const block = result.content?.find((c) => c.type === "text");
+
 	return block?.text ?? "";
 }
 
@@ -104,6 +116,7 @@ function wrapToolResultMarkdown(theme: Theme, markdown: string): InstanceType<ty
 	const box = new Box(0, 0);
 	box.addChild(md);
 	box.setBgFn((text) => theme.bg(TOOL_RESULT_BG, preserveBoxBackground(text)));
+
 	return box;
 }
 
@@ -113,10 +126,13 @@ function preserveBoxBackground(ansi: string): string {
 		const parts = params.split(";").filter(Boolean);
 		const kept: string[] = [];
 		let i = 0;
+
 		while (i < parts.length) {
 			const code = Number(parts[i]);
+
 			if (code === 38) {
 				kept.push(parts[i]);
+
 				if (parts[i + 1] === "5") {
 					kept.push(parts[i + 1], parts[i + 2]);
 					i += 3;
@@ -137,6 +153,7 @@ function preserveBoxBackground(ansi: string): string {
 				i++;
 			}
 		}
+
 		return kept.length ? `\x1b[${kept.join(";")}m` : "";
 	});
 }
@@ -148,6 +165,7 @@ function renderMarkdownResult(
 ): InstanceType<typeof Box> {
 	const raw = firstText(result);
 	const { page } = paginateText(raw, options.expanded ?? false, theme);
+
 	return wrapToolResultMarkdown(theme, page);
 }
 
@@ -155,7 +173,7 @@ export function renderWebsearchResult(
 	result: { content?: Array<{ type?: string; text?: string }> },
 	options: RenderOptions,
 	theme: Theme,
-	_context: unknown,
+	_context?: RenderResultContext,
 ) {
 	return renderMarkdownResult(result, options, theme);
 }
@@ -166,7 +184,7 @@ export function renderWebFetchResult(
 	result: { content?: Array<{ type?: string; text?: string }> },
 	options: RenderOptions,
 	theme: Theme,
-	_context: unknown,
+	_context?: RenderResultContext,
 ) {
 	return renderMarkdownResult(result, options, theme);
 }
@@ -175,7 +193,7 @@ export function renderContext7Result(
 	result: { content?: Array<{ type?: string; text?: string }> },
 	options: RenderOptions,
 	theme: Theme,
-	_context: unknown,
+	_context?: RenderResultContext,
 ) {
 	return renderMarkdownResult(result, options, theme);
 }
@@ -184,7 +202,7 @@ export function renderDeepwikiResult(
 	result: { content?: Array<{ type?: string; text?: string }> },
 	options: RenderOptions,
 	theme: Theme,
-	_context: unknown,
+	_context?: RenderResultContext,
 ) {
 	return renderMarkdownResult(result, options, theme);
 }
@@ -193,7 +211,7 @@ export function renderFetchContentResult(
 	result: { content?: Array<{ type?: string; text?: string }> },
 	options: RenderOptions,
 	theme: Theme,
-	_context: unknown,
+	_context?: RenderResultContext,
 ) {
 	return renderMarkdownResult(result, options, theme);
 }

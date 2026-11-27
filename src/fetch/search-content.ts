@@ -5,6 +5,7 @@ import { writeFetchToDiskCache } from "./disk-cache.js";
 import { resolveUrlContent } from "./resolve-content.js";
 
 const MAX_URLS = 5;
+
 const MAX_CONCURRENT = 2;
 
 export async function fetchSearchResultUrlsInBackground(
@@ -13,24 +14,42 @@ export async function fetchSearchResultUrlsInBackground(
 	urls: string[],
 	signal: AbortSignal | undefined,
 ): Promise<void> {
-	const unique = [...new Set(urls.map((u) => u.trim()).filter((u) => u.startsWith("http")))].slice(0, MAX_URLS);
+	const seen = new Set<string>();
+
+	for (const u of urls) {
+		const trimmed = u.trim();
+
+		if (trimmed.startsWith("http")) {
+			seen.add(trimmed);
+
+			if (seen.size >= MAX_URLS) break;
+		}
+	}
+
+	const unique = [...seen];
+
 	if (unique.length === 0) return;
 
 	let index = 0;
+
 	const worker = async () => {
 		while (index < unique.length) {
 			if (signal?.aborted) return;
 			const i = index++;
 			const url = unique[i];
+
 			if (!url) continue;
+
 			try {
 				const resolved = await resolveUrlContent(url, config, { signal, maxOutputChars: 2_000_000 });
+
 				const { record } = putFetchContent({
 					url: resolved.url,
 					title: resolved.title,
 					text: resolved.text,
 					extraction: resolved.extraction,
 				});
+
 				pi.appendEntry(FETCH_CONTENT_CUSTOM_TYPE, record);
 				writeFetchToDiskCache(record);
 			} catch {

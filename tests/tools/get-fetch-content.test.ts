@@ -19,8 +19,29 @@ describe("get_fetch_content tool", () => {
 			text: "abcdefghij",
 			extraction: "direct",
 		});
+
 		const tool = createGetFetchContentTool();
 		const result = await tool.execute("id", { fetchId: id, offset: 2, maxChars: 4 }, undefined);
 		expect(result.content[0]?.text).toContain("cdef");
+	});
+
+	it("accepts null optionals, out-of-bound offset/maxChars, and extra keys", async () => {
+		const { id } = putFetchContent({
+			url: "https://c.com",
+			title: null,
+			text: "0123456789",
+			extraction: "direct",
+		});
+
+		const tool = createGetFetchContentTool();
+
+		const result = await tool.execute(
+			"id",
+			{ fetchId: id, list: null, offset: -5.4, maxChars: null, extraKey: "ignored" },
+			undefined,
+		);
+
+		expect(result.content[0]?.text).toBe("0123456789");
+		expect(result.details).toMatchObject({ offset: 0, returnedChars: 10 });
 	});
 });

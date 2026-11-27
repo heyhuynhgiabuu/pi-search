@@ -21,9 +21,16 @@ function baseConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
 	};
 }
 
-function mockFetch(body: unknown, status = 200) {
-	const fn = vi.fn(async () => new Response(JSON.stringify(body), { status }));
-	globalThis.fetch = fn as unknown as typeof fetch;
+type MockParallelBody = {
+	search_id?: string;
+	results?: Array<{ url?: string; title?: string | null; publish_date?: string | null; excerpts?: string[] }>;
+	error?: string;
+};
+
+function mockFetch(body: MockParallelBody, status = 200) {
+	const fn = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status }));
+	globalThis.fetch = fn;
+
 	return fn;
 }
 
@@ -36,6 +43,7 @@ describe("parallelWebSearch", () => {
 				{ title: "no url" },
 			],
 		});
+
 		const params = normalizeExaParams({
 			query: "q",
 			searchType: "deep",
@@ -46,12 +54,13 @@ describe("parallelWebSearch", () => {
 			endPublishedDate: "2026-02-01",
 			highlightsMaxCharacters: 200,
 		});
+
 		const out = await parallelWebSearch("q", { apiKey: "k", params });
 
-		const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+		const [url, init] = fetchMock.mock.calls[0];
 		expect(url).toBe("https://api.parallel.ai/v1/search");
-		expect((init.headers as Record<string, string>)["x-api-key"]).toBe("k");
-		expect(JSON.parse(init.body as string)).toEqual({
+		expect(new Headers(init?.headers).get("x-api-key")).toBe("k");
+		expect(JSON.parse(String(init?.body ?? ""))).toEqual({
 			search_queries: ["q"],
 			mode: "advanced",
 			advanced_settings: {
@@ -69,9 +78,9 @@ describe("parallelWebSearch", () => {
 		const fetchMock = mockFetch({ results: [] });
 		await parallelWebSearch("q", { apiKey: "k", params: normalizeExaParams({ query: "q" }) });
 		await parallelWebSearch("q", { apiKey: "k", params: normalizeExaParams({ query: "q", searchType: "instant" }) });
-		const bodies = fetchMock.mock.calls.map((c) =>
-			JSON.parse((c as unknown as [string, RequestInit])[1].body as string),
-		);
+
+		const bodies = fetchMock.mock.calls.map((c) => JSON.parse(String(c[1]?.body ?? "")));
+
 		expect(bodies[0].mode).toBe("fast");
 		expect(bodies[1].mode).toBe("turbo");
 		expect(bodies[0].advanced_settings.source_policy).toBeUndefined();
@@ -92,7 +101,7 @@ describe("parallelWebSearch edge cases", () => {
 		const params = normalizeExaParams({ query: "q", recencyFilter: "week" });
 		const out = await parallelWebSearch("q", { apiKey: "k", params });
 		expect(out.results[0]?.title).toBe("https://a.example");
-		const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+		const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? ""));
 		expect(body.advanced_settings.source_policy.after_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 	});
 
@@ -100,8 +109,25 @@ describe("parallelWebSearch edge cases", () => {
 		const params = normalizeExaParams({ query: "q" });
 		mockFetch({ error: "x".repeat(1000) }, 500);
 		await expect(parallelWebSearch("q", { apiKey: "k", params })).rejects.toThrow(/Parallel API error 500/);
-		globalThis.fetch = vi.fn(async () => new Response("not json", { status: 200 })) as unknown as typeof fetch;
+		globalThis.fetch = vi.fn<typeof fetch>(async () => new Response("not json", { status: 200 }));
 		await expect(parallelWebSearch("q", { apiKey: "k", params })).rejects.toThrow(/invalid JSON/);
+	});
+
+	it("tolerates wrong-typed optional fields in Parallel results", async () => {
+		globalThis.fetch = vi.fn<typeof fetch>(
+			async () =>
+				new Response(
+					JSON.stringify({
+						search_id: 99,
+						results: [{ url: "https://a.example", title: "A", publish_date: 123, excerpts: ["ok", 42] }],
+					}),
+					{ status: 200 },
+				),
+		);
+		const out = await parallelWebSearch("q", { apiKey: "k", params: normalizeExaParams({ query: "q" }) });
+		expect(out.requestId).toBeUndefined();
+		expect(out.results[0]?.url).toBe("https://a.example");
+		expect(out.results[0]?.highlights).toEqual(["ok"]);
 	});
 });
 
@@ -110,55 +136,63 @@ describe("runWebsearchQueries provider selection", () => {
 
 	it("uses Parallel when only a Parallel key is set", async () => {
 		const fetchMock = mockFetch(ok);
+
 		const { provider, runs } = await runWebsearchQueries(
 			baseConfig({ parallelApiKey: "pk" }),
 			normalizeExaParams({ query: "q" }),
 			undefined,
 			undefined,
 		);
+
 		expect(provider).toBe("parallel");
 		expect(runs[0]?.results[0]?.url).toBe("https://p.example");
-		expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain("api.parallel.ai");
+		expect(String(fetchMock.mock.calls[0]?.[0])).toContain("api.parallel.ai");
 	});
 
 	it("honors searchProvider=exa even when a Parallel key exists", async () => {
 		const fetchMock = mockFetch({ results: [{ url: "https://e.example", title: "E" }] });
+
 		const { provider } = await runWebsearchQueries(
 			baseConfig({ exaApiKey: "ek", parallelApiKey: "pk", searchProvider: "exa" }),
 			normalizeExaParams({ query: "q" }),
 			undefined,
 			undefined,
 		);
+
 		expect(provider).toBe("exa-rest");
-		expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain("api.exa.ai");
+		expect(String(fetchMock.mock.calls[0]?.[0])).toContain("api.exa.ai");
 	});
 
 	it("prefers Exa over Parallel by default when both keys are set", async () => {
 		const fetchMock = mockFetch({ results: [{ url: "https://e.example", title: "E" }] });
+
 		const { provider } = await runWebsearchQueries(
 			baseConfig({ exaApiKey: "ek", parallelApiKey: "pk" }),
 			normalizeExaParams({ query: "q" }),
 			undefined,
 			undefined,
 		);
+
 		expect(provider).toBe("exa-rest");
-		expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain("api.exa.ai");
+		expect(String(fetchMock.mock.calls[0]?.[0])).toContain("api.exa.ai");
 	});
 
 	it("fails over to Brave when Parallel errors", async () => {
-		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) =>
+		globalThis.fetch = vi.fn<typeof fetch>(async (input) =>
 			String(input).includes("parallel.ai")
 				? new Response("boom", { status: 500 })
 				: new Response(JSON.stringify({ web: { results: [{ title: "B", url: "https://b.example" }] } }), {
 						status: 200,
 					}),
-		) as unknown as typeof fetch;
+		);
+
 		const { provider } = await runWebsearchQueries(
 			baseConfig({ parallelApiKey: "pk", braveApiKey: "bk" }),
 			normalizeExaParams({ query: "q" }),
 			undefined,
 			undefined,
 		);
+
 		expect(provider).toBe("brave");
 	});
 });

@@ -24,6 +24,7 @@ describe("disk cache integration", () => {
 			text: "cached body",
 			extraction: "direct",
 		});
+
 		clearFetchContentStore();
 		const loaded = getFetchContent(id);
 		expect(loaded?.text).toBe("cached body");

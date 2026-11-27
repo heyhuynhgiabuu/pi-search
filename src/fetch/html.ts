@@ -16,8 +16,10 @@ export function extractFromHtml(html: string, _pageUrl: string): HtmlExtractResu
 
 	try {
 		const article = new Readability(document, { charThreshold: 100 }).parse();
+
 		if (article?.textContent && article.textContent.trim().length > 0) {
 			const text = article.textContent.trim();
+
 			return { text, title: article.title?.trim() || title, method: "readability" };
 		}
 	} catch {
@@ -27,6 +29,7 @@ export function extractFromHtml(html: string, _pageUrl: string): HtmlExtractResu
 	const bodyHtml = document.body?.innerHTML ?? html;
 	let text = turndown.turndown(bodyHtml);
 	text = text.replace(/\n{3,}/g, "\n\n").trim();
+
 	return { text, title, method: "strip" };
 }
 
@@ -46,12 +49,17 @@ const CONSENT_MARKERS = [
 /** True when extracted text looks like a shell/consent page rather than article body. */
 export function isThinOrConsentPage(text: string): boolean {
 	const trimmed = text.trim();
+
 	if (trimmed.length < 400) return true;
 	const lower = trimmed.toLowerCase();
 	const hits = CONSENT_MARKERS.filter((m) => lower.includes(m)).length;
+
 	if (hits >= 2 && trimmed.length < 2500) return true;
+
 	if (hits >= 3) return true;
 	const alphaRatio = (trimmed.match(/[a-zA-Z]/g)?.length ?? 0) / Math.max(trimmed.length, 1);
+
 	if (alphaRatio < 0.35 && trimmed.length < 1500) return true;
+
 	return false;
 }

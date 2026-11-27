@@ -1,12 +1,27 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveConfig, validateDisabledTools } from "../src/config.js";
-import piSearchExtension, { TOOL_NAMES } from "../src/index.js";
+import piSearchExtension, {
+	type ErrorDetails,
+	type McpToolArguments,
+	TOOL_NAMES,
+	type ToolDetails,
+} from "../src/index.js";
 
 // Never read the real user config (~/.pi/pi-search.json) during tests.
 const HERMETIC_CONFIG = join(tmpdir(), "pi-search-test-absent.json");
+
 const originalConfigPath = process.env.PI_SEARCH_CONFIG_PATH;
+
+function asExtensionApi(stub: {
+	registerTool?: (tool: { name: string; label: string }) => void;
+	on?: () => void;
+}): ExtensionAPI {
+	// SAFETY: Minimal ExtensionAPI test stub recording registerTool/on calls.
+	return stub as never;
+}
 
 describe("pi-search extension", () => {
 	beforeEach(() => {
@@ -31,13 +46,15 @@ describe("pi-search extension", () => {
 
 	it("extension registers all tools with the pi-search title icon", () => {
 		const registered: Array<{ name: string; label: string }> = [];
+
 		const fakePi = {
 			registerTool(tool: { name: string; label: string }) {
 				registered.push(tool);
 			},
 			on() {},
-		} as never;
-		piSearchExtension(fakePi);
+		};
+
+		piSearchExtension(asExtensionApi(fakePi));
 		expect(registered.map((tool) => tool.name).sort()).toEqual([
 			"codesearch",
 			"context7",
@@ -59,22 +76,25 @@ describe("pi-search extension", () => {
 			firecrawl_scrape: "⚙ firecrawl_scrape",
 			firecrawl_crawl: "⚙ firecrawl_crawl",
 		});
-		expect(typeof (fakePi as { on?: unknown }).on).toBe("function");
+		expect(fakePi.on).toEqual(expect.any(Function));
 	});
 
 	it("extension skips disabled tools", () => {
 		const registered: string[] = [];
+
 		const fakePi = {
 			registerTool(tool: { name: string }) {
 				registered.push(tool.name);
 			},
 			on() {},
-		} as never;
+		};
+
 		// Force config to mark some tools as disabled by mutating the resolved config via env
 		const original = process.env.PI_SEARCH_DISABLED_TOOLS;
 		process.env.PI_SEARCH_DISABLED_TOOLS = "codesearch,deepwiki";
+
 		try {
-			piSearchExtension(fakePi);
+			piSearchExtension(asExtensionApi(fakePi));
 			expect(registered.sort()).toEqual([
 				"context7",
 				"firecrawl_crawl",
@@ -92,8 +112,9 @@ describe("pi-search extension", () => {
 	it("extension throws on unknown disabled tool", () => {
 		const original = process.env.PI_SEARCH_DISABLED_TOOLS;
 		process.env.PI_SEARCH_DISABLED_TOOLS = "totally-bogus";
+
 		try {
-			expect(() => piSearchExtension({} as never)).toThrowError(/Unknown tool/);
+			expect(() => piSearchExtension(asExtensionApi({}))).toThrowError(/Unknown tool/);
 		} finally {
 			if (original === undefined) delete process.env.PI_SEARCH_DISABLED_TOOLS;
 			else process.env.PI_SEARCH_DISABLED_TOOLS = original;
@@ -108,5 +129,14 @@ describe("pi-search extension", () => {
 	it("validateDisabledTools is re-exported and works", () => {
 		expect(() => validateDisabledTools(new Set(["websearch"]), TOOL_NAMES)).not.toThrow();
 		expect(() => validateDisabledTools(new Set(["bogus"]), TOOL_NAMES)).toThrowError(/Unknown tool/);
+	});
+
+	it("exports McpToolArguments, ErrorDetails, and ToolDetails types", () => {
+		const args: McpToolArguments = { query: "react", nested: { opt: undefined } };
+		const errDetails: ErrorDetails = { param: "numResults", nested: { value: 99 } };
+		const toolDetails: ToolDetails = { provider: "exa", extra: [1, "a"] };
+		expect(args.query).toBe("react");
+		expect(errDetails.param).toBe("numResults");
+		expect(toolDetails.provider).toBe("exa");
 	});
 });

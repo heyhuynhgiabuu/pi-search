@@ -1,17 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 import { type CrawlSubmitParams, FirecrawlClient, type ScrapeParams } from "../src/firecrawl/client.js";
 
-function mockFetch(status: number, body: unknown, headers?: Record<string, string>): typeof globalThis.fetch {
-	return vi.fn().mockResolvedValue({
-		ok: status >= 200 && status < 300,
-		status,
-		headers: new Map(Object.entries(headers ?? {})),
-		json: () => Promise.resolve(body),
-	}) as unknown as typeof globalThis.fetch;
+type MockJsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| undefined
+	| Array<MockJsonValue>
+	| { [key: string]: MockJsonValue };
+
+function mockFetch(status: number, body: MockJsonValue, headers?: Record<string, string>): typeof globalThis.fetch {
+	return async () => new Response(JSON.stringify(body), { status, headers });
 }
 
-function mockFetchFn(): ReturnType<typeof vi.fn> {
-	return vi.fn();
+function createFetchSpy(impl?: typeof globalThis.fetch) {
+	const spy = vi.fn<typeof globalThis.fetch>(impl);
+	const fetch: typeof globalThis.fetch = (input, init) => spy(input, init);
+
+	return { spy, fetch };
 }
 
 describe("FirecrawlClient", () => {
@@ -19,27 +26,23 @@ describe("FirecrawlClient", () => {
 
 	describe("scrape", () => {
 		it("sends correct request headers and body", async () => {
-			const fetch = mockFetchFn();
-			fetch.mockResolvedValue({
-				ok: true,
-				status: 200,
-				headers: new Map(),
-				json: () => Promise.resolve({ success: true, data: { markdown: "# Hello" } }),
-			});
+			const { spy, fetch } = createFetchSpy(
+				async () => new Response(JSON.stringify({ success: true, data: { markdown: "# Hello" } }), { status: 200 }),
+			);
 
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 			const params: ScrapeParams = { url: "https://example.com", onlyMainContent: true };
 			await client.scrape(params);
 
-			expect(fetch).toHaveBeenCalledTimes(1);
-			const [url, opts] = fetch.mock.calls[0];
+			expect(spy).toHaveBeenCalledTimes(1);
+			const [url, opts] = spy.mock.calls[0];
 			expect(url).toBe("https://api.firecrawl.dev/v2/scrape");
-			expect(opts.method).toBe("POST");
-			expect(opts.headers).toMatchObject({
+			expect(opts?.method).toBe("POST");
+			expect(opts?.headers).toMatchObject({
 				Authorization: `Bearer ${API_KEY}`,
 				"Content-Type": "application/json",
 			});
-			expect(JSON.parse(opts.body)).toEqual({
+			expect(JSON.parse(String(opts?.body))).toEqual({
 				url: "https://example.com",
 				onlyMainContent: true,
 				formats: ["markdown"],
@@ -54,6 +57,7 @@ describe("FirecrawlClient", () => {
 					metadata: { title: "Test", sourceURL: "https://example.com" },
 				},
 			});
+
 			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 
 			const result = await client.scrape({ url: "https://example.com" });
@@ -107,12 +111,8 @@ describe("FirecrawlClient", () => {
 		});
 
 		it("throws ProviderError on invalid JSON in 2xx response", async () => {
-			const fetch = vi.fn().mockResolvedValue({
-				ok: true,
-				status: 200,
-				headers: new Map(),
-				json: () => Promise.reject(new SyntaxError("Unexpected token")),
-			}) as unknown as typeof globalThis.fetch;
+			const fetch: typeof globalThis.fetch = async () => new Response("not-json", { status: 200 });
+
 			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 
 			const err = await client.scrape({ url: "https://example.com" }).catch((e: Error) => e);
@@ -130,17 +130,21 @@ describe("FirecrawlClient", () => {
 
 		it("passes AbortSignal to fetch and rejects with aborted on user abort", async () => {
 			const ac = new AbortController();
-			const fetch = vi.fn().mockImplementation(async (_url: string, opts?: RequestInit) => {
-				await new Promise<void>((_resolve, reject) => {
-					if (opts?.signal?.aborted) {
-						reject(new DOMException("The operation was aborted", "AbortError"));
-						return;
-					}
-					opts?.signal?.addEventListener("abort", () => {
-						reject(new DOMException("The operation was aborted", "AbortError"));
-					});
-				});
-			}) as unknown as typeof globalThis.fetch;
+
+			const { fetch } = createFetchSpy(
+				async (_url, opts) =>
+					new Promise<Response>((_resolve, reject) => {
+						if (opts?.signal?.aborted) {
+							reject(new DOMException("The operation was aborted", "AbortError"));
+
+							return;
+						}
+
+						opts?.signal?.addEventListener("abort", () => {
+							reject(new DOMException("The operation was aborted", "AbortError"));
+						});
+					}),
+			);
 
 			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 			const promise = client.scrape({ url: "https://example.com" }, ac.signal);
@@ -171,26 +175,24 @@ describe("FirecrawlClient", () => {
 
 	describe("submitCrawl", () => {
 		it("sends POST to /v2/crawl with correct body", async () => {
-			const fetch = mockFetchFn();
-			fetch.mockResolvedValue({
-				ok: true,
-				status: 200,
-				headers: new Map(),
-				json: () => Promise.resolve({ success: true, id: "crawl-123" }),
-			});
+			const { spy, fetch } = createFetchSpy(
+				async () => new Response(JSON.stringify({ success: true, id: "crawl-123" }), { status: 200 }),
+			);
 
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
+
 			const params: CrawlSubmitParams = {
 				url: "https://example.com",
 				maxPages: 5,
 			};
+
 			const result = await client.submitCrawl(params);
 
 			expect(result.id).toBe("crawl-123");
-			expect(fetch).toHaveBeenCalledTimes(1);
-			const [, opts] = fetch.mock.calls[0];
-			expect(opts.method).toBe("POST");
-			expect(JSON.parse(opts.body)).toMatchObject({
+			expect(spy).toHaveBeenCalledTimes(1);
+			const [, opts] = spy.mock.calls[0];
+			expect(opts?.method).toBe("POST");
+			expect(JSON.parse(String(opts?.body))).toMatchObject({
 				url: "https://example.com",
 				limit: 5,
 			});
@@ -198,17 +200,21 @@ describe("FirecrawlClient", () => {
 
 		it("passes AbortSignal to fetch and rejects with aborted on user abort", async () => {
 			const ac = new AbortController();
-			const fetch = vi.fn().mockImplementation(async (_url: string, opts?: RequestInit) => {
-				await new Promise<void>((_resolve, reject) => {
-					if (opts?.signal?.aborted) {
-						reject(new DOMException("Aborted", "AbortError"));
-						return;
-					}
-					opts?.signal?.addEventListener("abort", () => {
-						reject(new DOMException("Aborted", "AbortError"));
-					});
-				});
-			}) as unknown as typeof globalThis.fetch;
+
+			const { fetch } = createFetchSpy(
+				async (_url, opts) =>
+					new Promise<Response>((_resolve, reject) => {
+						if (opts?.signal?.aborted) {
+							reject(new DOMException("Aborted", "AbortError"));
+
+							return;
+						}
+
+						opts?.signal?.addEventListener("abort", () => {
+							reject(new DOMException("Aborted", "AbortError"));
+						});
+					}),
+			);
 
 			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 			const promise = client.submitCrawl({ url: "https://example.com" }, ac.signal);
@@ -228,6 +234,7 @@ describe("FirecrawlClient", () => {
 				creditsUsed: 10,
 				data: [{ markdown: "page1" }, { markdown: "page2" }, { markdown: "page3" }],
 			});
+
 			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 
 			const status = await client.getCrawlStatus("crawl-123");
@@ -262,17 +269,21 @@ describe("FirecrawlClient", () => {
 
 		it("passes AbortSignal to fetch and rejects with aborted on user abort", async () => {
 			const ac = new AbortController();
-			const fetch = vi.fn().mockImplementation(async (_url: string, opts?: RequestInit) => {
-				await new Promise<void>((_resolve, reject) => {
-					if (opts?.signal?.aborted) {
-						reject(new DOMException("Aborted", "AbortError"));
-						return;
-					}
-					opts?.signal?.addEventListener("abort", () => {
-						reject(new DOMException("Aborted", "AbortError"));
-					});
-				});
-			}) as unknown as typeof globalThis.fetch;
+
+			const { fetch } = createFetchSpy(
+				async (_url, opts) =>
+					new Promise<Response>((_resolve, reject) => {
+						if (opts?.signal?.aborted) {
+							reject(new DOMException("Aborted", "AbortError"));
+
+							return;
+						}
+
+						opts?.signal?.addEventListener("abort", () => {
+							reject(new DOMException("Aborted", "AbortError"));
+						});
+					}),
+			);
 
 			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 			const promise = client.getCrawlStatus("crawl-123", ac.signal);
@@ -285,87 +296,83 @@ describe("FirecrawlClient", () => {
 
 	describe("getCrawlResultsPage", () => {
 		it("fetches an absolute next URL and returns data", async () => {
-			const fetch = mockFetchFn();
-			fetch.mockResolvedValue({
-				ok: true,
-				status: 200,
-				headers: new Map(),
-				json: () =>
-					Promise.resolve({
-						status: "completed",
-						data: [{ markdown: "page4" }, { markdown: "page5" }],
-						next: "https://api.firecrawl.dev/v2/crawl/crawl-123/next?page=3",
-					}),
-			});
+			const { spy, fetch } = createFetchSpy(
+				async () =>
+					new Response(
+						JSON.stringify({
+							status: "completed",
+							data: [{ markdown: "page4" }, { markdown: "page5" }],
+							next: "https://api.firecrawl.dev/v2/crawl/crawl-123/next?page=3",
+						}),
+						{ status: 200 },
+					),
+			);
 
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 			const result = await client.getCrawlResultsPage("https://api.firecrawl.dev/v2/crawl/crawl-123/next?page=2");
 
 			expect(result.data).toHaveLength(2);
-			expect(result.data[0].markdown).toBe("page4");
+			expect(result.data?.[0]?.markdown).toBe("page4");
 			expect(result.next).toBe("https://api.firecrawl.dev/v2/crawl/crawl-123/next?page=3");
-			expect(fetch).toHaveBeenCalledTimes(1);
-			const [url, opts] = fetch.mock.calls[0];
+			expect(spy).toHaveBeenCalledTimes(1);
+			const [url, opts] = spy.mock.calls[0];
 			expect(url).toBe("https://api.firecrawl.dev/v2/crawl/crawl-123/next?page=2");
-			expect(opts.method).toBe("GET");
-			expect(opts.headers).toMatchObject({ Authorization: `Bearer ${API_KEY}` });
+			expect(opts?.method).toBe("GET");
+			expect(opts?.headers).toMatchObject({ Authorization: `Bearer ${API_KEY}` });
 		});
 
 		it("rejects firecrawl.dev with hostile suffix", async () => {
-			const fetch = mockFetchFn();
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const { fetch } = createFetchSpy();
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 
 			const err = await client.getCrawlResultsPage("https://evilfirecrawl.dev/v2/crawl/1").catch((e: Error) => e);
 			expect(err.code).toBe("validation_error");
 		});
 
 		it("rejects wrong subdomain on firecrawl.dev", async () => {
-			const fetch = mockFetchFn();
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const { fetch } = createFetchSpy();
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 
 			const err = await client.getCrawlResultsPage("https://sub.api.firecrawl.dev/v2/crawl/1").catch((e: Error) => e);
 			expect(err.code).toBe("validation_error");
 		});
 
 		it("rejects HTTP firecrawl.dev URL", async () => {
-			const fetch = mockFetchFn();
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const { fetch } = createFetchSpy();
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 
 			const err = await client.getCrawlResultsPage("http://api.firecrawl.dev/v2/crawl/1").catch((e: Error) => e);
 			expect(err.code).toBe("validation_error");
 		});
 
 		it("rejects firecrawl.dev URL without /v2/ path", async () => {
-			const fetch = mockFetchFn();
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const { fetch } = createFetchSpy();
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 
 			const err = await client.getCrawlResultsPage("https://api.firecrawl.dev/something/data").catch((e: Error) => e);
 			expect(err.code).toBe("validation_error");
 		});
 
 		it("rejects non-http/https URLs", async () => {
-			const fetch = mockFetchFn();
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const { fetch } = createFetchSpy();
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 
 			const err = await client.getCrawlResultsPage("ftp://files.com/data").catch((e: Error) => e);
 			expect(err.code).toBe("validation_error");
 		});
 
 		it("accepts exact https://api.firecrawl.dev/v2/ URL", async () => {
-			const fetch = mockFetchFn();
-			fetch.mockResolvedValue({
-				ok: true,
-				status: 200,
-				headers: new Map(),
-				json: () => Promise.resolve({ status: "completed" }),
-			});
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const { spy, fetch } = createFetchSpy(
+				async () => new Response(JSON.stringify({ status: "completed" }), { status: 200 }),
+			);
+
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 
 			const result = await client.getCrawlResultsPage("https://api.firecrawl.dev/v2/crawl/crawl-123/next?page=2");
 			expect(result.status).toBe("completed");
-			const [url, opts] = fetch.mock.calls[0];
+			const [url, opts] = spy.mock.calls[0];
 			expect(url).toBe("https://api.firecrawl.dev/v2/crawl/crawl-123/next?page=2");
-			expect(opts.headers).toMatchObject({ Authorization: `Bearer ${API_KEY}` });
+			expect(opts?.headers).toMatchObject({ Authorization: `Bearer ${API_KEY}` });
 		});
 
 		it("throws provider_error on malformed page response (missing data)", async () => {
@@ -375,56 +382,59 @@ describe("FirecrawlClient", () => {
 			const err = await client
 				.getCrawlResultsPage("https://api.firecrawl.dev/v2/crawl/crawl-123/next?page=2")
 				.catch((e: Error) => e);
+
 			expect(err.code).toBe("provider_error");
 		});
 
 		it("passes AbortSignal to fetch and rejects with aborted on user abort", async () => {
 			const ac = new AbortController();
-			const fetch = vi.fn().mockImplementation(async (_url: string, opts?: RequestInit) => {
+
+			const { fetch } = createFetchSpy(async (_url, opts) => {
 				if (opts?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-				return { ok: true, status: 200, headers: new Map(), json: () => Promise.resolve({ data: [] }) };
-			}) as unknown as typeof globalThis.fetch;
+
+				return new Response(JSON.stringify({ data: [] }), { status: 200 });
+			});
 
 			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 			ac.abort();
+
 			const err = await client
 				.getCrawlResultsPage("https://api.firecrawl.dev/v2/crawl/crawl-123/next?page=2", ac.signal)
 				.catch((e: Error) => e);
+
 			expect(err.code).toBe("aborted");
 		});
 	});
 
 	describe("cancelCrawl", () => {
 		it("sends DELETE to /v2/crawl/:id", async () => {
-			const fetch = mockFetchFn();
-			fetch.mockResolvedValue({
-				ok: true,
-				status: 200,
-				headers: new Map(),
-				json: () => Promise.resolve({ status: "cancelled" }),
-			});
+			const { spy, fetch } = createFetchSpy(
+				async () => new Response(JSON.stringify({ status: "cancelled" }), { status: 200 }),
+			);
 
-			const client = new FirecrawlClient({ apiKey: API_KEY, fetch: fetch as unknown as typeof globalThis.fetch });
+			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 			await client.cancelCrawl("crawl-123");
 
-			expect(fetch).toHaveBeenCalledTimes(1);
-			const [url, opts] = fetch.mock.calls[0];
+			expect(spy).toHaveBeenCalledTimes(1);
+			const [url, opts] = spy.mock.calls[0];
 			expect(url).toBe("https://api.firecrawl.dev/v2/crawl/crawl-123");
-			expect(opts.method).toBe("DELETE");
+			expect(opts?.method).toBe("DELETE");
 		});
 
 		it("passes AbortSignal to fetch", async () => {
 			const ac = new AbortController();
-			const fetch = vi.fn().mockImplementation(async (_url: string, opts?: RequestInit) => {
+
+			const { spy, fetch } = createFetchSpy(async (_url, opts) => {
 				if (opts?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-				return { ok: true, status: 200, headers: new Map(), json: () => Promise.resolve({ status: "cancelled" }) };
-			}) as unknown as typeof globalThis.fetch;
+
+				return new Response(JSON.stringify({ status: "cancelled" }), { status: 200 });
+			});
 
 			const client = new FirecrawlClient({ apiKey: API_KEY, fetch });
 			await client.cancelCrawl("crawl-123", ac.signal);
-			expect(fetch).toHaveBeenCalledTimes(1);
-			const [, opts] = fetch.mock.calls[0];
-			expect(opts.signal).toBe(ac.signal);
+			expect(spy).toHaveBeenCalledTimes(1);
+			const [, opts] = spy.mock.calls[0];
+			expect(opts?.signal).toBe(ac.signal);
 		});
 	});
 });

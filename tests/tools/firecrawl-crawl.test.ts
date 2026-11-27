@@ -1,14 +1,21 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FETCH_CONTENT_CUSTOM_TYPE } from "../../src/fetch/content-store.js";
 import { createFirecrawlCrawlTool } from "../../src/tools/firecrawl-crawl.js";
 import type { ResolvedConfig } from "../../src/types.js";
 
-function mockPi(): {
+interface MockPi {
+	pi: ExtensionAPI;
 	appendEntry: ReturnType<typeof vi.fn>;
-} {
-	return {
-		appendEntry: vi.fn(),
-	} as unknown as Parameters<typeof createFirecrawlCrawlTool>[0];
+}
+
+function createMockPi(): MockPi {
+	const appendEntry = vi.fn();
+	const partial: Partial<ExtensionAPI> = { appendEntry };
+	// SAFETY: These tests only exercise `pi.appendEntry`; no other `ExtensionAPI` members are accessed.
+	const pi = partial as ExtensionAPI;
+
+	return { pi, appendEntry };
 }
 
 function mockConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
@@ -26,25 +33,27 @@ function mockConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
 	};
 }
 
+type MockJsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| undefined
+	| Array<MockJsonValue>
+	| { [key: string]: MockJsonValue };
+
 /** Creates a mock fetch that returns specific responses in sequence */
-function makeSequencedMock(...responses: Array<unknown>) {
+function makeSequencedMock(...responses: Array<MockJsonValue>) {
 	let idx = 0;
+
 	return vi.fn().mockImplementation(async () => {
 		const res = responses[idx++];
+
 		if (res === undefined) {
-			return {
-				ok: true,
-				status: 200,
-				headers: new Map(),
-				json: () => Promise.resolve({ status: "completed", completed: 0, total: 0 }),
-			};
+			return new Response(JSON.stringify({ status: "completed", completed: 0, total: 0 }), { status: 200 });
 		}
-		return {
-			ok: true,
-			status: 200,
-			headers: new Map(),
-			json: () => Promise.resolve(res),
-		};
+
+		return new Response(JSON.stringify(res), { status: 200 });
 	});
 }
 
@@ -63,7 +72,8 @@ describe("firecrawl_crawl tool", () => {
 	});
 
 	it("rejects missing API key when none is configured", async () => {
-		const tool = createFirecrawlCrawlTool(mockPi(), mockConfig({ firecrawlApiKey: undefined }), FAST_POLL_MS);
+		const { pi } = createMockPi();
+		const tool = createFirecrawlCrawlTool(pi, mockConfig({ firecrawlApiKey: undefined }), FAST_POLL_MS);
 		const result = await tool.execute("call-1", { url: "https://example.com" }, new AbortController().signal);
 
 		expect(result.details?.error?.code).toBe("config_error");
@@ -87,7 +97,8 @@ describe("firecrawl_crawl tool", () => {
 		);
 		vi.stubGlobal("fetch", seqFetch);
 
-		const tool = createFirecrawlCrawlTool(mockPi(), mockConfig(), FAST_POLL_MS);
+		const { pi } = createMockPi();
+		const tool = createFirecrawlCrawlTool(pi, mockConfig(), FAST_POLL_MS);
 		const result = await tool.execute("call-1", { url: "https://example.com" }, new AbortController().signal);
 
 		expect(result.details?.pages).toBe(3);
@@ -100,7 +111,8 @@ describe("firecrawl_crawl tool", () => {
 		seqFetch = makeSequencedMock({ success: true, id: "crawl-fail" }, { status: "failed", total: 5, completed: 2 });
 		vi.stubGlobal("fetch", seqFetch);
 
-		const tool = createFirecrawlCrawlTool(mockPi(), mockConfig(), FAST_POLL_MS);
+		const { pi } = createMockPi();
+		const tool = createFirecrawlCrawlTool(pi, mockConfig(), FAST_POLL_MS);
 		const result = await tool.execute("call-1", { url: "https://example.com/page" }, new AbortController().signal);
 
 		expect(result.details?.error?.code).toBe("provider_error");
@@ -114,7 +126,8 @@ describe("firecrawl_crawl tool", () => {
 		);
 		vi.stubGlobal("fetch", seqFetch);
 
-		const tool = createFirecrawlCrawlTool(mockPi(), mockConfig(), FAST_POLL_MS);
+		const { pi } = createMockPi();
+		const tool = createFirecrawlCrawlTool(pi, mockConfig(), FAST_POLL_MS);
 		const result = await tool.execute("call-1", { url: "https://example.com" }, new AbortController().signal);
 
 		expect(result.details?.error?.code).toBe("provider_error");
@@ -122,7 +135,7 @@ describe("firecrawl_crawl tool", () => {
 	});
 
 	it("collects pagination pages via next URL with no duplicates", async () => {
-		const pi = mockPi();
+		const { pi } = createMockPi();
 		const tool = createFirecrawlCrawlTool(pi, mockConfig(), FAST_POLL_MS);
 
 		seqFetch = makeSequencedMock(
@@ -154,7 +167,7 @@ describe("firecrawl_crawl tool", () => {
 	});
 
 	it("persists crawl data as full content store records", async () => {
-		const pi = mockPi();
+		const { pi, appendEntry } = createMockPi();
 		const tool = createFirecrawlCrawlTool(pi, mockConfig(), FAST_POLL_MS);
 		seqFetch = makeSequencedMock(
 			{ success: true, id: "crawl-store" }, // submit
@@ -185,8 +198,8 @@ describe("firecrawl_crawl tool", () => {
 		// Flush setImmediate callbacks for appendEntry
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
-		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
-		const [entryType, record] = pi.appendEntry.mock.calls[0];
+		expect(appendEntry).toHaveBeenCalledTimes(1);
+		const [entryType, record] = appendEntry.mock.calls[0];
 		expect(entryType).toBe(FETCH_CONTENT_CUSTOM_TYPE);
 		expect(record).toHaveProperty("id");
 		expect(record).toHaveProperty("createdAt");
@@ -197,7 +210,7 @@ describe("firecrawl_crawl tool", () => {
 	});
 
 	it("calls onUpdate with progress during crawl", async () => {
-		const pi = mockPi();
+		const { pi } = createMockPi();
 		const onUpdate = vi.fn();
 
 		seqFetch = makeSequencedMock(
@@ -221,49 +234,41 @@ describe("firecrawl_crawl tool", () => {
 	});
 
 	it("attempts remote cancellation on in-flight fetch abort via signal", async () => {
-		const tool = createFirecrawlCrawlTool(mockPi(), mockConfig(), FAST_POLL_MS);
+		const { pi } = createMockPi();
+		const tool = createFirecrawlCrawlTool(pi, mockConfig(), FAST_POLL_MS);
 		const cancelFn = vi.fn();
 
-		const fetchMock = vi.fn().mockImplementation(async (_url: string, opts?: Record<string, unknown>) => {
-			const objOpts = opts as Record<string, unknown> | undefined;
-
+		const fetchMock = vi.fn().mockImplementation(async (_url: string, opts?: RequestInit) => {
 			// POST = submit
-			if (!objOpts || objOpts?.method === "POST" || !objOpts?.method) {
-				return {
-					ok: true,
-					status: 200,
-					headers: new Map(),
-					json: () => Promise.resolve({ success: true, id: "crawl-inflight-abort" }),
-				};
+			if (!opts || opts.method === "POST" || !opts.method) {
+				return new Response(JSON.stringify({ success: true, id: "crawl-inflight-abort" }), { status: 200 });
 			}
+
 			// DELETE = cancel
-			if (objOpts?.method === "DELETE") {
+			if (opts.method === "DELETE") {
 				cancelFn();
-				return {
-					ok: true,
-					status: 200,
-					headers: new Map(),
-					json: () => Promise.resolve({ status: "cancelled" }),
-				};
+
+				return new Response(JSON.stringify({ status: "cancelled" }), { status: 200 });
 			}
+
 			// GET poll — hold until aborted
+			const pollSignal = opts.signal;
+
 			await new Promise<void>((_resolve, reject) => {
-				if (objOpts?.signal) {
-					(objOpts.signal as AbortSignal).addEventListener("abort", () => {
+				if (pollSignal) {
+					pollSignal.addEventListener("abort", () => {
 						reject(new DOMException("Aborted during poll fetch", "AbortError"));
 					});
-					if ((objOpts.signal as AbortSignal).aborted) {
+
+					if (pollSignal.aborted) {
 						reject(new DOMException("Aborted during poll fetch", "AbortError"));
 					}
 				}
 			});
-			return {
-				ok: true,
-				status: 200,
-				headers: new Map(),
-				json: () => Promise.resolve({ status: "scraping", completed: 1, total: 5 }),
-			};
+
+			return new Response(JSON.stringify({ status: "scraping", completed: 1, total: 5 }), { status: 200 });
 		});
+
 		vi.stubGlobal("fetch", fetchMock);
 
 		const ac = new AbortController();
@@ -282,7 +287,8 @@ describe("firecrawl_crawl tool", () => {
 	});
 
 	it("rejects empty URL", async () => {
-		const tool = createFirecrawlCrawlTool(mockPi(), mockConfig(), FAST_POLL_MS);
+		const { pi } = createMockPi();
+		const tool = createFirecrawlCrawlTool(pi, mockConfig(), FAST_POLL_MS);
 		const result = await tool.execute("call-1", { url: "" }, new AbortController().signal);
 
 		expect(result.content?.[0]?.text).toContain("Error:");
@@ -290,9 +296,39 @@ describe("firecrawl_crawl tool", () => {
 	});
 
 	it("rejects non-http/https URL", async () => {
-		const tool = createFirecrawlCrawlTool(mockPi(), mockConfig(), FAST_POLL_MS);
+		const { pi } = createMockPi();
+		const tool = createFirecrawlCrawlTool(pi, mockConfig(), FAST_POLL_MS);
 		const result = await tool.execute("call-1", { url: "ftp://evil.com/file" }, new AbortController().signal);
 
 		expect(result.details?.error?.code).toBe("validation_error");
+	});
+
+	it("filters non-string items from includePaths/excludePaths and accepts null optionals and extra keys", async () => {
+		seqFetch = makeSequencedMock(
+			{ success: true, id: "crawl-lenient" },
+			{ status: "completed", completed: 1, total: 1, creditsUsed: 1, data: [{ markdown: "# Ok" }] },
+		);
+		vi.stubGlobal("fetch", seqFetch);
+
+		const { pi } = createMockPi();
+		const tool = createFirecrawlCrawlTool(pi, mockConfig(), FAST_POLL_MS);
+
+		const result = await tool.execute(
+			"call-1",
+			{
+				url: "https://example.com",
+				maxPages: null,
+				includePaths: ["/docs/.*", 123, null],
+				excludePaths: null,
+				extraKey: true,
+			},
+			new AbortController().signal,
+		);
+
+		expect(result.details?.crawlId).toBe("crawl-lenient");
+		const submitBody = JSON.parse(String(seqFetch.mock.calls[0]?.[1]?.body ?? ""));
+		expect(submitBody.limit).toBe(5);
+		expect(submitBody.includePaths).toEqual(["/docs/.*"]);
+		expect(submitBody.excludePaths).toBeUndefined();
 	});
 });

@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { num, obj, opt, str } from "@earendil-works/pi-schema";
+import { compile, num, obj, opt, str, unknown } from "@earendil-works/pi-schema";
 import { buildErrorResult, toPiSearchError } from "../errors.js";
 import { FETCH_CONTENT_CUSTOM_TYPE, putFetchContent, WEB_FETCH_INLINE_MAX_CHARS } from "../fetch/content-store.js";
 import { resolveUrlContent } from "../fetch/resolve-content.js";
@@ -7,10 +7,38 @@ import type { ResolvedConfig } from "../types.js";
 import { renderToolCall, renderWebFetchResult } from "./render.js";
 
 const DEFAULT_MAX_OUTPUT_CHARS = 50_000;
+
 const MAX_OUTPUT_CHARS_LIMIT = 200_000;
+
+const stringValidator = compile(str());
+
+const numberValidator = compile(num());
+
+const webFetchExecuteValidator = compile(
+	obj(
+		{
+			url: opt(unknown()),
+			maxOutputChars: opt(unknown()),
+		},
+		{ open: true },
+	),
+);
 
 export function createWebFetchTool(pi: ExtensionAPI, config: ResolvedConfig): ToolDefinition {
 	const canRetrieveStoredContent = !config.disabledTools.has("get_fetch_content");
+
+	const parameters = obj({
+		url: str({ description: "The URL to fetch (must be http:// or https://)." }),
+		maxOutputChars: opt(
+			num({
+				description: canRetrieveStoredContent
+					? `Maximum characters to return inline (default ${DEFAULT_MAX_OUTPUT_CHARS}). Full body may still be continued with get_fetch_content.`
+					: `Maximum characters to return inline (default ${DEFAULT_MAX_OUTPUT_CHARS}).`,
+				minimum: 1000,
+				maximum: MAX_OUTPUT_CHARS_LIMIT,
+			}),
+		),
+	});
 
 	return {
 		name: "web_fetch",
@@ -25,23 +53,18 @@ export function createWebFetchTool(pi: ExtensionAPI, config: ResolvedConfig): To
 			"Use web_fetch only for a user-provided or search-result URL when external page content is needed.",
 			"Do not use web_fetch for greetings, local files, or local repository questions.",
 		],
-		parameters: obj({
-			url: str({ description: "The URL to fetch (must be http:// or https://)." }),
-			maxOutputChars: opt(
-				num({
-					description: canRetrieveStoredContent
-						? `Maximum characters to return inline (default ${DEFAULT_MAX_OUTPUT_CHARS}). Full body may still be continued with get_fetch_content.`
-						: `Maximum characters to return inline (default ${DEFAULT_MAX_OUTPUT_CHARS}).`,
-					minimum: 1000,
-					maximum: MAX_OUTPUT_CHARS_LIMIT,
-				}),
-			),
-		}),
-		async execute(_toolCallId, params: Record<string, unknown>, signal) {
+		parameters,
+		async execute(_toolCallId, params, signal) {
 			try {
-				const url = typeof params.url === "string" ? params.url : "";
+				const parsed = webFetchExecuteValidator.validate(params);
+
+				const url = parsed.ok && stringValidator.check(parsed.value.url) ? parsed.value.url : "";
+
 				const maxOutputChars =
-					typeof params.maxOutputChars === "number" ? params.maxOutputChars : DEFAULT_MAX_OUTPUT_CHARS;
+					parsed.ok && numberValidator.check(parsed.value.maxOutputChars)
+						? parsed.value.maxOutputChars
+						: DEFAULT_MAX_OUTPUT_CHARS;
+
 				const resolved = await resolveUrlContent(url, config, { signal, maxOutputChars: MAX_OUTPUT_CHARS_LIMIT });
 
 				const { id: fetchId, record } = putFetchContent({
@@ -50,9 +73,11 @@ export function createWebFetchTool(pi: ExtensionAPI, config: ResolvedConfig): To
 					text: resolved.text,
 					extraction: resolved.extraction,
 				});
+
 				pi.appendEntry(FETCH_CONTENT_CUSTOM_TYPE, record);
 
 				const inlineLimit = Math.min(maxOutputChars, WEB_FETCH_INLINE_MAX_CHARS);
+
 				const inlineBody =
 					resolved.text.length > inlineLimit
 						? `${resolved.text.slice(0, inlineLimit)}\n\n${

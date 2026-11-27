@@ -7,16 +7,25 @@
  *  - the public API is documented in one location
  */
 
+/** JSON-compatible primitive value. */
+export type JsonPrimitive = string | number | boolean | null;
+
+/** JSON-compatible value (with optional undefined for TypeScript optional fields). */
+export type JsonValue = JsonPrimitive | undefined | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+
+/** Structured metadata attached to tool results and progress updates. */
+export type ToolDetails = Record<string, JsonValue>;
+
 /** Result returned by a single tool execution. Mirrors AgentToolResult. */
 export type ToolExecuteResult = {
 	content: Array<{ type: "text"; text: string }>;
-	details?: Record<string, unknown>;
+	details?: ToolDetails;
 };
 
 /** Update emitted mid-execution (streaming progress). */
 export type ToolUpdate = {
 	content: Array<{ type: "text"; text: string }>;
-	details?: Record<string, unknown>;
+	details?: ToolDetails;
 };
 
 /** Per-tool factory options (DI). */

@@ -18,11 +18,13 @@ export async function extractPdfTextFromBytes(
 	const { totalPages, text } = await extractText(pdf, { mergePages: true });
 	const merged = Array.isArray(text) ? text.join("\n\n") : String(text ?? "");
 	const trimmed = merged.trim();
+
 	if (!trimmed) {
 		throw fetchError("fetch_error", "PDF contains no extractable text (scanned/OCR not supported)", {
 			url: options.url,
 			totalPages,
 		});
 	}
+
 	return { text: trimmed, totalPages };
 }

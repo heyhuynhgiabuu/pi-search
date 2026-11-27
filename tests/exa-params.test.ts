@@ -34,6 +34,7 @@ describe("normalizeExaParams", () => {
 	});
 
 	it("rejects invalid searchType", () => {
+		// SAFETY: Deliberately passing an invalid searchType to verify runtime ValidationError.
 		expect(() => normalizeExaParams({ query: "x", searchType: "lol" as never })).toThrowError(ValidationError);
 	});
 
@@ -53,6 +54,7 @@ describe("normalizeExaParams", () => {
 			{ query: "x", startPublishedDate: "2026-01-01", endPublishedDate: "2026-01-31" },
 			{ now: () => NOW },
 		);
+
 		expect(out.startPublishedDate).toBe("2026-01-01T00:00:00.000Z");
 		expect(out.endPublishedDate).toBe("2026-01-31T23:59:59.999Z");
 	});
@@ -75,6 +77,7 @@ describe("normalizeExaParams", () => {
 			},
 			{ now: () => NOW },
 		);
+
 		expect(out.includeDomains.sort()).toEqual(["nytimes.com", "reuters.com"]);
 		expect(out.excludeDomains).toEqual(["reddit.com"]);
 	});

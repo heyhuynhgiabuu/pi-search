@@ -9,7 +9,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import { resolveConfig } from "../config.js";
 import { buildErrorResult, FetchError, toPiSearchError, ValidationError } from "../errors.js";
 import { renderContext7Result, renderToolCall } from "./render.js";
@@ -38,12 +38,10 @@ export function createContext7Tool(_pi: ExtensionAPI) {
 		label: "⚙ context7",
 		description:
 			"Fetch up-to-date documentation and code examples for a library via Context7. Use libraryName='react' or '/reactjs/react.dev' for the official React docs, '/vercel/next.js' for Next.js, etc. Returns ready-to-use code snippets and citations.",
-		parameters: Type.Object({
-			libraryName: Type.String({ description: "Library name or Context7 path (e.g. 'react', '/reactjs/react.dev')." }),
-			topic: Type.Optional(Type.String({ description: "Specific topic to focus on (e.g. 'hooks', 'routing')." })),
-			maxTokens: Type.Optional(
-				Type.Integer({ description: "Maximum tokens to return (default 10000).", minimum: 1000, maximum: 50000 }),
-			),
+		parameters: obj({
+			libraryName: str({ description: "Library name or Context7 path (e.g. 'react', '/reactjs/react.dev')." }),
+			topic: opt(str({ description: "Specific topic to focus on (e.g. 'hooks', 'routing')." })),
+			maxTokens: opt(int({ description: "Maximum tokens to return (default 10000).", minimum: 1000, maximum: 50000 })),
 		}),
 		async execute(
 			_id: string,

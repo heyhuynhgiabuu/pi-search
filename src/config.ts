@@ -17,7 +17,7 @@ import { readKetchBraveApiKey } from "./config/external-keys.js";
 import { ConfigError } from "./errors.js";
 import { parseSsrfAllowRanges } from "./fetch/ssrf.js";
 import { parseUrlRewriteRules } from "./fetch/url-rewrites.js";
-import type { ResolvedConfig } from "./types.js";
+import type { ResolvedConfig, SearchProvider } from "./types.js";
 
 export const DEFAULT_CONFIG_PATH = join(homedir(), ".pi", "pi-search.json");
 
@@ -25,6 +25,8 @@ export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
 
 type RawConfig = {
 	exaApiKey?: string;
+	parallelApiKey?: string;
+	searchProvider?: string;
 	braveApiKey?: string;
 	firecrawlApiKey?: string;
 	apiKey?: string; // alias
@@ -83,6 +85,11 @@ export function resolveConfig(options: ResolveConfigOptions = {}): ResolvedConfi
 	const argDisabled = options.disabledToolsFromArgs ?? [];
 
 	const exaApiKey = env.EXA_API_KEY || file.exaApiKey;
+	const parallelApiKey = env.PARALLEL_API_KEY || file.parallelApiKey;
+	const searchProvider = parseSearchProvider(env.PI_SEARCH_PROVIDER || file.searchProvider);
+	if (searchProvider === "parallel" && !parallelApiKey) {
+		throw new ConfigError("searchProvider is 'parallel' but no PARALLEL_API_KEY or parallelApiKey is set.");
+	}
 	const braveApiKey = env.BRAVE_API_KEY || file.braveApiKey || readKetchBraveApiKey(homeDir);
 	const firecrawlApiKey = env.FIRECRAWL_API_KEY || file.firecrawlApiKey;
 	const githubToken = env.GITHUB_TOKEN || env.GH_TOKEN || file.githubToken;
@@ -103,6 +110,8 @@ export function resolveConfig(options: ResolveConfigOptions = {}): ResolvedConfi
 
 	return {
 		exaApiKey,
+		parallelApiKey,
+		...(searchProvider ? { searchProvider } : {}),
 		braveApiKey,
 		firecrawlApiKey,
 		githubToken,
@@ -112,6 +121,14 @@ export function resolveConfig(options: ResolveConfigOptions = {}): ResolvedConfi
 		ssrf: { allowRanges },
 		urlRewrites: parseUrlRewriteRules(file.urlRewrites),
 	};
+}
+
+function parseSearchProvider(value: unknown): SearchProvider | undefined {
+	if (!value) return undefined;
+	if (typeof value !== "string") throw new ConfigError("searchProvider must be a string ('exa' or 'parallel').");
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "exa" || normalized === "parallel") return normalized;
+	throw new ConfigError(`Unknown searchProvider '${value}'. Use 'exa' or 'parallel'.`);
 }
 
 /** Throws ConfigError if any unknown tool names are disabled. */

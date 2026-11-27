@@ -1,5 +1,5 @@
 import type { AgentToolUpdateCallback, ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { arr, int, obj, opt, str } from "@earendil-works/pi-schema";
 import {
 	buildErrorResult,
 	ConfigError,
@@ -142,17 +142,11 @@ export function createFirecrawlCrawlTool(
 		description:
 			"Crawl up to 20 website pages through Firecrawl. Each crawled page consumes Firecrawl credits. " +
 			"Defaults to 5 pages and requires FIRECRAWL_API_KEY or firecrawlApiKey in config.",
-		parameters: Type.Object({
-			url: Type.String({ description: "Absolute http:// or https:// URL to crawl." }),
-			maxPages: Type.Optional(
-				Type.Integer({ description: "Maximum pages. Defaults to 5; maximum 20.", minimum: 1, maximum: MAX_PAGES }),
-			),
-			includePaths: Type.Optional(
-				Type.Array(Type.String(), { description: "URL pathname regex patterns to include." }),
-			),
-			excludePaths: Type.Optional(
-				Type.Array(Type.String(), { description: "URL pathname regex patterns to exclude." }),
-			),
+		parameters: obj({
+			url: str({ description: "Absolute http:// or https:// URL to crawl." }),
+			maxPages: opt(int({ description: "Maximum pages. Defaults to 5; maximum 20.", minimum: 1, maximum: MAX_PAGES })),
+			includePaths: opt(arr(str(), { description: "URL pathname regex patterns to include." })),
+			excludePaths: opt(arr(str(), { description: "URL pathname regex patterns to exclude." })),
 		}),
 		async execute(_toolCallId, rawParams: Record<string, unknown>, signal, onUpdate) {
 			if (!config.firecrawlApiKey) {

@@ -7,7 +7,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { arr, int, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import { resolveConfig } from "../config.js";
 import { buildErrorResult, toPiSearchError, ValidationError } from "../errors.js";
 import { createExaRestClient, formatExaResult, normalizeExaResults } from "../exa/client.js";
@@ -43,26 +43,23 @@ export function createCodesearchTool(_pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use codesearch only for external code or library references, never for local repository search.",
 		],
-		parameters: Type.Object({
-			query: Type.Optional(Type.String({ description: "Single search query." })),
-			queries: Type.Optional(Type.Array(Type.String(), { description: "Multiple queries searched sequentially." })),
-			numResults: Type.Optional(
-				Type.Integer({
+		parameters: obj({
+			query: opt(str({ description: "Single search query." })),
+			queries: opt(arr(str(), { description: "Multiple queries searched sequentially." })),
+			numResults: opt(
+				int({
 					description: `Results per query (default ${DEFAULT_NUM_RESULTS}, max ${MAX_NUM_RESULTS}).`,
 					minimum: 1,
 					maximum: MAX_NUM_RESULTS,
 				}),
 			),
-			searchType: Type.Optional(
-				Type.Union(
-					CODE_SEARCH_TYPES.map((s) => Type.Literal(s)),
-					{
-						description: "Exa search mode (default auto).",
-					},
-				),
+			searchType: opt(
+				oneOf(CODE_SEARCH_TYPES, {
+					description: "Exa search mode (default auto).",
+				}),
 			),
-			highlightsMaxCharacters: Type.Optional(
-				Type.Integer({
+			highlightsMaxCharacters: opt(
+				int({
 					description: `Maximum characters for highlights (default ${DEFAULT_HIGHLIGHTS_MAX_CHARACTERS}, ${MIN_HIGHLIGHTS_MAX_CHARACTERS}-${MAX_HIGHLIGHTS_MAX_CHARACTERS}).`,
 					minimum: MIN_HIGHLIGHTS_MAX_CHARACTERS,
 					maximum: MAX_HIGHLIGHTS_MAX_CHARACTERS,

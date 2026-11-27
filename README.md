@@ -43,6 +43,8 @@ Optional. Create `~/.pi/pi-search.json`:
 ```json
 {
 	"exaApiKey": "your-exa-api-key",
+	"parallelApiKey": "your-parallel-api-key",
+	"searchProvider": "parallel",
 	"braveApiKey": "your-brave-api-key",
 	"firecrawlApiKey": "your-firecrawl-api-key",
 	"disabledTools": ["codesearch"],
@@ -59,12 +61,16 @@ Or set environment variables:
 
 ```bash
 export EXA_API_KEY=your-key
+export PARALLEL_API_KEY=your-key      # optional; use Parallel (api.parallel.ai) for websearch
+export PI_SEARCH_PROVIDER=parallel    # exa | parallel; default: exa if EXA_API_KEY is set, else parallel if PARALLEL_API_KEY is set
 export BRAVE_API_KEY=your-brave-key   # optional; failover (free key: https://brave.com/search/api/)
 export FIRECRAWL_API_KEY=your-key     # optional; required for firecrawl_scrape and firecrawl_crawl
 export PI_SEARCH_DISABLED_TOOLS=codesearch,deepwiki
 export PI_SEARCH_USE_REST=true        # force direct REST (default: false; auto-enabled when EXA_API_KEY is set)
 export PI_SEARCH_CONFIG_PATH=/path/to/config.json
 ```
+
+**Parallel provider (`websearch` only).** `searchType` maps to Parallel modes (`instant`→`turbo`, `auto`/`neural`→`fast`, `deep*`→`advanced`). domain filters become `source_policy`, and `startPublishedDate`/`recencyFilter` become `after_date`. `endPublishedDate` has no Parallel equivalent and is ignored. `codesearch` still uses Exa. Parallel's free tier is not zero-data-retention; check your data policy first.
 
 Resolution order (highest priority first):
 
@@ -109,7 +115,7 @@ The research tools target public external resources. Use Pi's local tools (`read
 - **Discover:** `websearch` (Exa deep modes) → `web_fetch` or `includeContent: true` on search → `get_fetch_content` with `fetchId` or `list: true`.
 - **Libraries / repos:** `context7`, `codesearch`, `deepwiki`; GitHub URLs in `web_fetch` use the API (`GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token`).
 - **Doc site roots:** `web_fetch` on `https://example.com/` may load `/llms.txt` when present.
-- **Brave:** Used only when Exa fails if `BRAVE_API_KEY` / `braveApiKey` is set (also reads `~/.config/ketch/config.json` → `brave_api_key` if unset).
+- **Brave:** Used only when the primary provider (Exa or Parallel) fails if `BRAVE_API_KEY` / `braveApiKey` is set (also reads `~/.config/ketch/config.json` → `brave_api_key` if unset).
 
 Optional config: `urlRewrites` (`[{ "match": "...", "replace": "..." }]`), `githubToken`, `ssrf.allowRanges`.
 

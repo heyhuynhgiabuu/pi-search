@@ -46,6 +46,22 @@ describe("config", () => {
 			expect(config.exaApiKey).toBe("env-key");
 		});
 
+		it("reads the Parallel key and provider from env", () => {
+			process.env.PARALLEL_API_KEY = "pk";
+			process.env.PI_SEARCH_PROVIDER = "Parallel";
+			const config = resolveConfig({ env: process.env, homeDir: tempDir });
+			expect(config.parallelApiKey).toBe("pk");
+			expect(config.searchProvider).toBe("parallel");
+		});
+
+		it("rejects searchProvider=parallel without a key and unknown providers", () => {
+			delete process.env.PARALLEL_API_KEY;
+			process.env.PI_SEARCH_PROVIDER = "parallel";
+			expect(() => resolveConfig({ env: process.env, homeDir: tempDir })).toThrow(/PARALLEL_API_KEY/);
+			process.env.PI_SEARCH_PROVIDER = "bing";
+			expect(() => resolveConfig({ env: process.env, homeDir: tempDir })).toThrow(/Unknown searchProvider/);
+		});
+
 		it("falls back to config file when env is empty", () => {
 			delete process.env.EXA_API_KEY;
 			const _configPath = join(tempDir, ".pi", "pi-search.json");

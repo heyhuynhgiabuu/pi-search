@@ -119,9 +119,14 @@ export type Citation = {
 	source: "exa" | "context7" | "deepwiki" | "web" | "github";
 };
 
+export type SearchProvider = "exa" | "parallel";
+
 /** Effective config resolved at extension load time. */
 export type ResolvedConfig = {
 	exaApiKey?: string;
+	parallelApiKey?: string;
+	/** Explicit primary web-search provider; when unset it is inferred from which API key is present. */
+	searchProvider?: SearchProvider;
 	braveApiKey?: string;
 	firecrawlApiKey?: string;
 	disabledTools: Set<string>;

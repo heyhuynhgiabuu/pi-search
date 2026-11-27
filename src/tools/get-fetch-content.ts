@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { bool, int, obj, opt, str } from "@earendil-works/pi-schema";
 import { buildErrorResult, toPiSearchError, ValidationError } from "../errors.js";
 import { getFetchContent, listFetchContent } from "../fetch/content-store.js";
 import { renderFetchContentResult, renderToolCall } from "./render.js";
@@ -15,16 +15,12 @@ export function createGetFetchContentTool(): ToolDefinition {
 		renderResult: renderFetchContentResult,
 		description:
 			"Retrieve full text from a prior web_fetch when the tool response was truncated. Use fetchId from web_fetch details, or list=true to see recent stored fetches.",
-		parameters: Type.Object({
-			fetchId: Type.Optional(Type.String({ description: "ID from web_fetch details.fetchId." })),
-			list: Type.Optional(
-				Type.Boolean({ description: "List recent stored fetches (ids and URLs) instead of reading one." }),
-			),
-			offset: Type.Optional(
-				Type.Integer({ description: "Character offset into stored text (default 0).", minimum: 0 }),
-			),
-			maxChars: Type.Optional(
-				Type.Integer({
+		parameters: obj({
+			fetchId: opt(str({ description: "ID from web_fetch details.fetchId." })),
+			list: opt(bool({ description: "List recent stored fetches (ids and URLs) instead of reading one." })),
+			offset: opt(int({ description: "Character offset into stored text (default 0).", minimum: 0 })),
+			maxChars: opt(
+				int({
 					description: `Max characters to return (default ${DEFAULT_SLICE_CHARS}).`,
 					minimum: 1000,
 					maximum: MAX_SLICE_CHARS,

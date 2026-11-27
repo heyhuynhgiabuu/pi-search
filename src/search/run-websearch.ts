@@ -5,12 +5,13 @@ import type { normalizeExaParams } from "../exa/params.js";
 import { dedupeCitations, extractCitationsFromMcpText } from "../tools/citations.js";
 import type { ResolvedConfig } from "../types.js";
 import { braveWebSearch } from "./brave.js";
+import { parallelWebSearch } from "./parallel.js";
 
 export type WebsearchQueryRun = {
 	query: string;
 	requestId?: string;
 	costDollars?: number;
-	provider: "exa-rest" | "exa-mcp" | "brave";
+	provider: "exa-rest" | "exa-mcp" | "parallel" | "brave";
 	results: import("../types.js").NormalizedExaResult[];
 };
 
@@ -27,14 +28,18 @@ export async function runWebsearchQueries(
 	const primaryErrors: string[] = [];
 
 	try {
-		const runs = config.exaApiKey
-			? await runExaRest(config.exaApiKey, effectiveParams, signal, onUpdate)
-			: await runExaMcp(effectiveParams, signal, onUpdate, config.mcpTimeoutMs);
+		const primary = pickPrimaryProvider(config);
+		const runs =
+			primary.provider === "parallel"
+				? await runParallel(primary.apiKey, effectiveParams, signal, onUpdate)
+				: primary.provider === "exa-rest"
+					? await runExaRest(primary.apiKey, effectiveParams, signal, onUpdate)
+					: await runExaMcp(effectiveParams, signal, onUpdate, config.mcpTimeoutMs);
 
 		if (runsHaveResults(runs)) {
-			return { runs, provider: config.exaApiKey ? "exa-rest" : "exa-mcp" };
+			return { runs, provider: primary.provider };
 		}
-		primaryErrors.push("Exa returned no results");
+		primaryErrors.push(`${primary.provider === "parallel" ? "Parallel" : "Exa"} returned no results`);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		primaryErrors.push(message);
@@ -48,7 +53,7 @@ export async function runWebsearchQueries(
 	}
 
 	onUpdate?.({
-		content: [{ type: "text", text: "Exa unavailable or empty — trying Brave Search fallback..." }],
+		content: [{ type: "text", text: "Primary search unavailable or empty — trying Brave Search fallback..." }],
 		details: { phase: "failover", provider: "brave" } as Record<string, unknown>,
 	});
 
@@ -60,6 +65,16 @@ export async function runWebsearchQueries(
 	}
 
 	return { runs, provider: "brave" };
+}
+
+type PrimaryProvider = { provider: "parallel" | "exa-rest"; apiKey: string } | { provider: "exa-mcp" };
+
+function pickPrimaryProvider({ searchProvider, parallelApiKey, exaApiKey }: ResolvedConfig): PrimaryProvider {
+	const parallel = parallelApiKey ? ({ provider: "parallel", apiKey: parallelApiKey } as const) : undefined;
+	const exa = exaApiKey ? ({ provider: "exa-rest", apiKey: exaApiKey } as const) : undefined;
+	if (searchProvider === "parallel") return parallel ?? { provider: "exa-mcp" };
+	if (searchProvider === "exa") return exa ?? { provider: "exa-mcp" };
+	return exa ?? parallel ?? { provider: "exa-mcp" };
 }
 
 function runsHaveResults(runs: WebsearchQueryRun[]): boolean {
@@ -88,6 +103,25 @@ async function runExaRest(
 			provider: "exa-rest",
 			results: normalizeExaResults(response.results),
 		});
+	}
+	return runs;
+}
+
+async function runParallel(
+	apiKey: string,
+	effectiveParams: EffectiveParams,
+	signal: AbortSignal | undefined,
+	onUpdate: Parameters<typeof runWebsearchQueries>[3],
+): Promise<WebsearchQueryRun[]> {
+	const runs: WebsearchQueryRun[] = [];
+	for (const [index, query] of effectiveParams.queries.entries()) {
+		if (signal?.aborted) throw new ValidationError("Search aborted.");
+		onUpdate?.({
+			content: [{ type: "text", text: `Parallel searching ${index + 1}/${effectiveParams.queries.length}: ${query}` }],
+			details: { phase: "searching", currentQuery: query, progress: index / effectiveParams.queries.length },
+		});
+		const { requestId, results } = await parallelWebSearch(query, { apiKey, params: effectiveParams, signal });
+		runs.push({ query, requestId, provider: "parallel", results });
 	}
 	return runs;
 }

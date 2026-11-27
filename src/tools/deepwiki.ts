@@ -7,7 +7,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { obj, str } from "@earendil-works/pi-schema";
 import { resolveConfig } from "../config.js";
 import { buildErrorResult, toPiSearchError, ValidationError } from "../errors.js";
 import { renderDeepwikiResult, renderToolCall } from "./render.js";
@@ -20,12 +20,12 @@ export function createDeepwikiTool(_pi: ExtensionAPI) {
 		label: "⚙ deepwiki",
 		description:
 			"Ask questions about any public GitHub repository. Powered by DeepWiki. Use repoName='owner/name' (e.g. 'facebook/react') and a natural-language question. Returns synthesized answer with citations to source files.",
-		parameters: Type.Object({
-			repoName: Type.String({
+		parameters: obj({
+			repoName: str({
 				description: "GitHub repo in 'owner/name' format, e.g. 'facebook/react' or 'vercel/next.js'.",
 				pattern: "^[\\w.-]+/[\\w.-]+$",
 			}),
-			question: Type.String({ description: "Natural-language question about the repository." }),
+			question: str({ description: "Natural-language question about the repository." }),
 		}),
 		async execute(
 			_id: string,

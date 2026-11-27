@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { num, obj, opt, str } from "@earendil-works/pi-schema";
 import { buildErrorResult, toPiSearchError } from "../errors.js";
 import { FETCH_CONTENT_CUSTOM_TYPE, putFetchContent, WEB_FETCH_INLINE_MAX_CHARS } from "../fetch/content-store.js";
 import { resolveUrlContent } from "../fetch/resolve-content.js";
@@ -25,10 +25,10 @@ export function createWebFetchTool(pi: ExtensionAPI, config: ResolvedConfig): To
 			"Use web_fetch only for a user-provided or search-result URL when external page content is needed.",
 			"Do not use web_fetch for greetings, local files, or local repository questions.",
 		],
-		parameters: Type.Object({
-			url: Type.String({ description: "The URL to fetch (must be http:// or https://)." }),
-			maxOutputChars: Type.Optional(
-				Type.Number({
+		parameters: obj({
+			url: str({ description: "The URL to fetch (must be http:// or https://)." }),
+			maxOutputChars: opt(
+				num({
 					description: canRetrieveStoredContent
 						? `Maximum characters to return inline (default ${DEFAULT_MAX_OUTPUT_CHARS}). Full body may still be continued with get_fetch_content.`
 						: `Maximum characters to return inline (default ${DEFAULT_MAX_OUTPUT_CHARS}).`,

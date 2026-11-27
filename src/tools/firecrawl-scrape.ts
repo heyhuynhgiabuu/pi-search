@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { bool, num, obj, opt, str } from "@earendil-works/pi-schema";
 import { buildErrorResult, ConfigError, toPiSearchError, ValidationError } from "../errors.js";
 import { FETCH_CONTENT_CUSTOM_TYPE, putFetchContent } from "../fetch/content-store.js";
 import { FirecrawlClient } from "../firecrawl/client.js";
@@ -21,13 +21,13 @@ export function createFirecrawlScrapeTool(pi: ExtensionAPI, config: ResolvedConf
 		description:
 			"Scrape a web page into Markdown using Firecrawl. Each page consumes Firecrawl credits. " +
 			"Requires FIRECRAWL_API_KEY or firecrawlApiKey in config. Full content is retrievable via get_fetch_content.",
-		parameters: Type.Object({
-			url: Type.String({ description: "Absolute http:// or https:// URL to scrape." }),
-			onlyMainContent: Type.Optional(
-				Type.Boolean({ description: "Extract only the page's main content. Defaults to true.", default: true }),
+		parameters: obj({
+			url: str({ description: "Absolute http:// or https:// URL to scrape." }),
+			onlyMainContent: opt(
+				bool({ description: "Extract only the page's main content. Defaults to true.", default: true }),
 			),
-			timeout: Type.Optional(
-				Type.Number({ description: "Firecrawl request timeout in milliseconds.", minimum: 1_000, maximum: 120_000 }),
+			timeout: opt(
+				num({ description: "Firecrawl request timeout in milliseconds.", minimum: 1_000, maximum: 120_000 }),
 			),
 		}),
 		async execute(_toolCallId, params: Record<string, unknown>, signal) {

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+### Minor Changes
+
+- 9215ca9: Add Parallel (`api.parallel.ai`) as an optional `websearch` provider. Set `PARALLEL_API_KEY` / `parallelApiKey` and optionally `PI_SEARCH_PROVIDER` / `searchProvider` (`exa` | `parallel`). Exa stays the default when `EXA_API_KEY` is set; Brave failover applies to both. `codesearch` still uses Exa.
+
+### Patch Changes
+
+- 9215ca9: Migrate tool parameter schemas from `typebox` to `@earendil-works/pi-schema` and drop the `typebox` dependency.
+
 ## 0.3.3
 
 ### Patch Changes
